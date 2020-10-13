@@ -98,3 +98,8 @@ function JMethod(desc) {
 // var object = new JType("Ljava/lang/fooble;");
 // var method = new JMethod("(I[ILHelloWorld;)D");
 //
+
+module.exports = {
+	JMethod,
+	JType,
+}

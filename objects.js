@@ -1,3 +1,18 @@
+const {
+	ACC_PUBLIC,
+	ACC_PRIVATE,
+	ACC_PROTECTED,
+	ACC_STATIC,
+	ACC_FINAL,
+	ACC_SYNCHRONIZED,
+	ACC_BRIDGE,
+	ACC_VARARGS,
+	ACC_NATIVE,
+	ACC_ABSTRACT,
+	ACC_STRICT,
+	ACC_SYNTHETIC,
+} = require('./access-flags');
+
 function JObj(jclass) {
 	this.jclass = jclass;
 	this.fieldVals = {};			// keyed by name: value
@@ -92,8 +107,9 @@ function JLoadedClass(className, superclassName, constantPool, fields, methods, 
 	}
 }
 
-
-
-
- 
+module.exports = {
+	JLoadedClass,
+	JClass,
+	JObj,
+}
 
