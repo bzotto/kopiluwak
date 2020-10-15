@@ -24,20 +24,11 @@ function JClass(loadedClass) {
 	}
 
 	this.mainEntryPointMethod = function() {
-		var mainMethod = this.methods["main"];
+		var mainMethod = this.methods["main#([Ljava/lang/String;)V"];
 		if (mainMethod) {
 			var access_flags = mainMethod.access;
 			if ((access_flags & ACC_PUBLIC) && (access_flags & ACC_STATIC)) {
-				// Verify the method descriptor-- should be (String[])void.
-				var jmethod = mainMethod.jmethod;
-				if (jmethod.returnType.isVoid() && 
-					jmethod.parameterTypes.length == 1 && 
-					jmethod.parameterTypes[0].dimensions == 1 &&
-					jmethod.parameterTypes[0].isObject() &&
-					jmethod.parameterTypes[0].objectClassDescriptor == "java/lang/String") {
-						// This is the entry point.
-						return mainMethod;
-				}
+				return mainMethod;
 			}
 		}
 		return null;
