@@ -9,24 +9,6 @@
 // Resolved classes
 var LoadedClasses = [];
 
-function FieldRefForIndex(classObj, index) {
-	var c = classObj.cp[index];
-	if (c["tag"] != CONSTANT_Fieldref) {
-		console.log("Invalid field ref error: constant index " + index + " is not a field ref.");
-		return;
-	}
-	return c;
-}
-
-function MethodRefForIndex(index) {
-	var c = ConstantPool[index];
-	if (c["tag"] != CONSTANT_Methodref) {
-		console.log("Invalid method ref error: constant index " + index + " is not a method ref.");
-		return;
-	}
-	return c;
-}
-
 function ResolveClass(className) {
 	var jclass = null;
 	for (var i = 0; i < LoadedClasses.length; i++) {
@@ -58,17 +40,14 @@ function ResolveMethodReference(methodInfo) {
 		return {};
 	}
 	
-	var methodRef = jclass.methods[methodInfo.methodName];
+	let methodIdentifier = methodInfo.methodName + "#" + methodInfo.descriptor;
+	
+	var methodRef = jclass.methods[methodIdentifier];
 	
 	if (!methodRef) {
-		console.log("ERROR: Failed to resolve method " + methodInfo.methodName + " in class " + methodInfo.className );
-		return {};
-	} 
-	
-	if (methodRef.jmethod.desc != methodInfo.descriptor) {
 		console.log("ERROR: Failed to resolve method " + methodInfo.methodName + " in " + methodInfo.className + " with descriptor " + methodInfo.descriptor);
 		return {};
-	}
+	} 
 	
 	return { "jclass": jclass, "method": methodRef };	
 }
@@ -599,10 +578,13 @@ function JClassFromLoadedClass(loadedClass) {
 				break;
 			}
 		}
+		
+		let methodIdentifier = name + "#" + desc;
+		
 		if (codeAttr) {
-			jclass.methods[name] = { "jmethod": new JMethod(desc), "access": access_flags, "impl": null, "code": codeAttr.code, "exceptions": codeAttr.exception_table };
+			jclass.methods[methodIdentifier] = { "name": name, "jmethod": new JMethod(desc), "access": access_flags, "impl": null, "code": codeAttr.code, "exceptions": codeAttr.exception_table };
 		} else {
-			jclass.methods[name] = { "jmethod": new JMethod(desc), "access": access_flags, "impl": null, "code": null, "exceptions": null };
+			jclass.methods[methodIdentifier] = { "name": name, "jmethod": new JMethod(desc), "access": access_flags, "impl": null, "code": null, "exceptions": null };
 		}
 	}
 	
@@ -624,7 +606,7 @@ function InjectOutputMockObjects() {
 	// Object
 	var javaLangObjectLoadedClass = new JLoadedClass("java/lang/Object", null, [], [], [], []);
 	var javaLangObjectJclass = new JClass(javaLangObjectLoadedClass);
-	javaLangObjectJclass.methods["<init>"] = { "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 
+	javaLangObjectJclass.methods["<init>#()V"] = { "name": "<init>", "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 
 		function(jobj) {
 			console.log("java.lang.Object <init> invoked");
 		}
@@ -638,7 +620,7 @@ function InjectOutputMockObjects() {
 	
 	var javaLangExceptionLoadedClass = new JLoadedClass("java/lang/Exception", "java/lang/Throwable", [], [], [], []);
 	var javaLangExceptionJClass = new JClass(javaLangExceptionLoadedClass);
-	javaLangExceptionJClass.methods["<init>"] = { "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 		
+	javaLangExceptionJClass.methods["<init>#()V"] = { "name": "<init>", "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 		
 	function(jobj) {
 			console.log("java.lang.Exception <init> invoked");
 		}
@@ -648,7 +630,12 @@ function InjectOutputMockObjects() {
 	// Stuff that lets us print stuff to the console. 
 	var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/io/FilterOutputStream", [], [], [], []);
 	var javaIoPrintStreamJclass = new JClass(javaIoPrintStreamLoadedClass);
-	javaIoPrintStreamJclass.methods["println"] = { "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl": 
+	javaIoPrintStreamJclass.methods["println#(Ljava/lang/String;)V"] = { "name": "println", "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl": 
+		function(jobj, x) { 
+			console.log(x);
+		}
+	};
+	javaIoPrintStreamJclass.methods["println#(I)V"] = { "name": "println", "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl": 
 		function(jobj, x) { 
 			console.log(x);
 		}
