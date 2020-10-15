@@ -151,7 +151,7 @@ function KLClassLoader(classFileHexStringOrBytes) {
 		} else if (name == "BootstrapMethods") {
 			let numBootstrapMethods = readU2();
 			let bootstrapMethods = [];
-			for (let i = 0; i < num_bootstrap_methods; i++) {
+			for (let i = 0; i < numBootstrapMethods; i++) {
 				let bootstrapMethod = {};
 				bootstrapMethod["bootstrap_method_ref"] = readU2();
 				let numBootstrapArguments = readU2();
@@ -163,7 +163,20 @@ function KLClassLoader(classFileHexStringOrBytes) {
 				bootstrapMethods.push(bootstrapMethod);
 			}
 			info["bootstrap_methods"] = bootstrapMethods;
+		} else if (name == "SourceFile") {
+			info["sourcefile_index"] = readU2();
+		} else if (name == "LineNumberTable") {
+			let lineNumberTableLength = readU2();
+			let lineNumberTable = [];
+			for (let i = 0; i < lineNumberTableLength; i++) {
+				let lineNumberEntry = {};
+				lineNumberEntry["start_pc"] = readU2();
+				lineNumberEntry["line_number"] = readU2();
+				lineNumberTable.push(lineNumberEntry);
+			}
+			info["line_number_table"] = lineNumberTable;
 		} else {
+			// console.log("classloader: skipping attribute \"" + name + "\"");
 			info["info"] = readU1Array(attributeLength);
 		}
 		return info;

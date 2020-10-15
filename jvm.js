@@ -9,6 +9,22 @@
 // Resolved classes
 var LoadedClasses = [];
 
+function AddClass(loadedClass) {
+	// Ensure that the superclass chain is already loaded.
+	let current = loadedClass.superclassName;
+	while (current) {
+		let superclass = ResolveClass(current);
+		if (!superclass) {
+			console.log("JVM: Warning: Loading " + loadedClass.className + " without superclass " + current);
+			break;
+		}
+		current = superclass.superclassName;
+	}
+
+	LoadedClasses.push(loadedClass);	
+	console.log("JVM: Loaded class " + loadedClass.className);
+}
+
 function ResolveClass(className) {
 	var jclass = null;
 	for (var i = 0; i < LoadedClasses.length; i++) {
@@ -26,14 +42,7 @@ function ResolveClass(className) {
 }
 
 function ResolveMethodReference(methodInfo) {
-	var jclass = null;
-	for (var i = 0; i < LoadedClasses.length; i++) {
-		var loadedClass = LoadedClasses[i];
-		if (loadedClass.className == methodInfo.className) {
-			jclass = loadedClass;
-			break;
-		}
-	}
+	let jclass = ResolveClass(methodInfo.className);
 	
 	if (jclass == null) {
 		console.log("ERROR: Failed to resolve class " + methodInfo.className);
@@ -53,14 +62,7 @@ function ResolveMethodReference(methodInfo) {
 }
 
 function ResolveFieldReference(fieldInfo) {
-	var jclass = null;
-	for (var i = 0; i < LoadedClasses.length; i++) {
-		var loadedClass = LoadedClasses[i];
-		if (loadedClass.className == fieldInfo.className) {
-			jclass = loadedClass;
-			break;
-		}
-	}
+	let jclass = ResolveClass(fieldInfo.className);
 	
 	if (jclass == null) {
 		console.log("ERROR: Failed to resolve class " + fieldInfo.className);
@@ -68,13 +70,8 @@ function ResolveFieldReference(fieldInfo) {
 	}
 	
 	var fieldRef = jclass.fields[fieldInfo.fieldName];
-	
-	if (!fieldRef) {
-		console.log("ERROR: Failed to resolve method " + fieldInfo.fieldName + " in class " + fieldInfo.className );
-		return {};
-	} 
-	
-	if (fieldRef.jtype.desc != fieldInfo.descriptor) {
+		
+	if (!fieldRef || fieldRef.jtype.desc != fieldInfo.descriptor) {
 		console.log("ERROR: Failed to resolve field " + fieldInfo.fieldName + " in " + fieldInfo.className + " with descriptor " + fieldInfo.descriptor);
 		return {};
 	}
@@ -143,6 +140,42 @@ function CreateStackFrame(jclass, method) {
 	return frame;
 }
 
+function DebugBacktrace(threadContext) {	
+	let backtrace = "";
+	for (let i = 0; i < threadContext.stack.length; i++) {
+		let frame = threadContext.stack[i];
+		
+		// Is there a line number table?
+		let lineNumbers = frame.method.lineNumbers;
+		let lineNumber = null;
+		if (lineNumbers) {
+			for (let j = 0; j < lineNumbers.length; j++) {
+				let lineEntry = lineNumbers[j];
+				if (lineEntry.start_pc > frame.pc) {
+					break;
+				}
+				lineNumber = lineEntry.line_number;
+			}
+		}
+		// Is there a source file name?
+		let sourceFileName = frame.jclass.loadedClass.sourceFileName();
+		
+		let fqmn = frame.jclass.className.replace(/\//g, ".") + "." + frame.method.name;
+		if (!sourceFileName) {
+			sourceFileName = "unknown";
+		}
+		if (!lineNumber) {
+			lineNumber = "??";
+		}
+		backtrace += "\t" + (fqmn + "(" + sourceFileName + ":" + lineNumber + ")");
+		if (i == 0) {
+			backtrace += "\t<---";
+		}	
+		backtrace += "\n";
+	}
+	console.log(backtrace);
+}
+
 function RunJavaThreadWithMethod(jclass, method) {
 	var threadContext = {};
 	threadContext.stack = [];
@@ -183,6 +216,9 @@ function RunJavaThreadWithMethod(jclass, method) {
 		} 		
 		
 		while (pc < code.length) {
+			// update this before executing so it's present in case we want to dump the user stack
+			frame.pc = pc;       
+			
 			var opcode = code[pc];
 			var nextPc;
 	
@@ -426,7 +462,8 @@ function RunJavaThreadWithMethod(jclass, method) {
 						nextPc = pc + 3;
 					} else {
 						let childFrame = CreateStackFrame(methodRef.jclass, methodRef.method);		
-									
+						childFrame.localVariables = args;
+						
 						// Save the current next-PC state.
 						frame.pc = pc + 3;
 					
@@ -454,6 +491,7 @@ function RunJavaThreadWithMethod(jclass, method) {
 						nextPc = pc + 3;
 					} else {
 						let childFrame = CreateStackFrame(methodRef.jclass, methodRef.method);		
+						childFrame.localVariables = args;
 						
 						// Save the current next-PC state.
 						frame.pc = pc + 3;
@@ -474,6 +512,7 @@ function RunJavaThreadWithMethod(jclass, method) {
 					var methodRef = ResolveMethodReference(methodInfo);  // returns {jclass, method reference}
 
 					let childFrame = CreateStackFrame(methodRef.jclass, methodRef.method);		
+					childFrame.localVariables = frame.operandStack.slice();
 					
 					// Save the current next-PC state.
 					frame.pc = pc + 3;
@@ -510,7 +549,7 @@ function RunJavaThreadWithMethod(jclass, method) {
 					// get the constant entry for the invokedynamic
 					var cdynamic = frame.jclass.loadedClass.constantPool[index];
 					var bootstrapIndex = cdynamic.bootstrap_method_attr_index;
-					var bootstrapAttr = frame.jclass.loadedClass.bootstrapMethodsAttribute();
+					var bootstrapAttr = frame.jclass.loadedClass.attributeWithName("BootstrapMethods");
 					var bootstrap = bootstrapAttr.bootstrap_methods[bootstrapIndex];
 					var bootstrapMethodRef = bootstrap.bootstrap_method_ref;
 					var bootstrapArgs = bootstrap.bootstrap_arguments;
@@ -559,20 +598,20 @@ function RunJavaThreadWithMethod(jclass, method) {
 }
 
 function JClassFromLoadedClass(loadedClass) {
-	var jclass = new JClass(loadedClass);
+	let jclass = new JClass(loadedClass);
 	
 	// Walk the methods in the class and patch them up.
-	for (var i = 0; i < loadedClass.methods.length; i++) {
-		var method = loadedClass.methods[i];
-		var name = loadedClass.stringFromUtf8Constant(method.name_index);
-		var desc = loadedClass.stringFromUtf8Constant(method.descriptor_index);
-		var access_flags = method.access_flags;
+	for (let i = 0; i < loadedClass.methods.length; i++) {
+		let method = loadedClass.methods[i];
+		let name = loadedClass.stringFromUtf8Constant(method.name_index);
+		let desc = loadedClass.stringFromUtf8Constant(method.descriptor_index);
+		let access_flags = method.access_flags;
 		
 		// Is there code?	
-		var codeAttr = null;
+		let codeAttr = null;
 		for (var j = 0; j < method.attributes.length; j++) {
-			var attr = method.attributes[j];
-			var attrname = loadedClass.stringFromUtf8Constant(attr.attribute_name_index);
+			let attr = method.attributes[j];
+			let attrname = loadedClass.stringFromUtf8Constant(attr.attribute_name_index);
 			if (attrname == "Code") {
 				codeAttr = attr;
 				break;
@@ -581,11 +620,28 @@ function JClassFromLoadedClass(loadedClass) {
 		
 		let methodIdentifier = name + "#" + desc;
 		
-		if (codeAttr) {
-			jclass.methods[methodIdentifier] = { "name": name, "jmethod": new JMethod(desc), "access": access_flags, "impl": null, "code": codeAttr.code, "exceptions": codeAttr.exception_table };
-		} else {
-			jclass.methods[methodIdentifier] = { "name": name, "jmethod": new JMethod(desc), "access": access_flags, "impl": null, "code": null, "exceptions": null };
+		// Find a line number table if one exists.
+		let lineNumberTable = null;
+		if (codeAttr && codeAttr.attributes) {
+			for (let j = 0; j < codeAttr.attributes.length; j++) {
+				let attr = codeAttr.attributes[j];
+				let attrname = loadedClass.stringFromUtf8Constant(attr.attribute_name_index);
+				if (attrname == "LineNumberTable") {
+					lineNumberTable = attr.line_number_table;
+					break;
+				}
+			}
 		}
+		
+		jclass.methods[methodIdentifier] = { 
+			"name": name, 
+			"jmethod": new JMethod(desc), 
+			"access": access_flags, 
+			"impl": null, 
+			"code": codeAttr ? codeAttr.code : null,
+			"exceptions": codeAttr ? codeAttr.exception_table : null,
+			"lineNumbers": lineNumberTable 
+		};
 	}
 	
 	// Walk the fields in the class and patch them up!
@@ -611,12 +667,12 @@ function InjectOutputMockObjects() {
 			console.log("java.lang.Object <init> invoked");
 		}
 	};
-	LoadedClasses.push(javaLangObjectJclass);
+	AddClass(javaLangObjectJclass);
 	
 	// Throwable and Exception
 	var javaLangThrowableLoadedClass = new JLoadedClass("java/lang/Throwable", "java/lang/Object", [], [], [], []);
 	var javaLangThrowableJClass = new JClass(javaLangThrowableLoadedClass);
-	LoadedClasses.push(javaLangThrowableJClass);
+	AddClass(javaLangThrowableJClass);
 	
 	var javaLangExceptionLoadedClass = new JLoadedClass("java/lang/Exception", "java/lang/Throwable", [], [], [], []);
 	var javaLangExceptionJClass = new JClass(javaLangExceptionLoadedClass);
@@ -625,7 +681,7 @@ function InjectOutputMockObjects() {
 			console.log("java.lang.Exception <init> invoked");
 		}
 	}
-	LoadedClasses.push(javaLangExceptionJClass);
+	AddClass(javaLangExceptionJClass);
 	
 	// Stuff that lets us print stuff to the console. 
 	var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/io/FilterOutputStream", [], [], [], []);
@@ -640,13 +696,13 @@ function InjectOutputMockObjects() {
 			console.log(x);
 		}
 	};
-	LoadedClasses.push(javaIoPrintStreamJclass);
+	AddClass(javaIoPrintStreamJclass);
 	var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
 	
 	var javaLangSystemLoadedClass = new JLoadedClass("java/lang/System", "java/lang/Object", [], [], [], []);
 	var javaLangSystemJclass = new JClass(javaLangSystemLoadedClass);
 	javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava/io/PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC, "value": systemOutStreamObj};
-	LoadedClasses.push(javaLangSystemJclass);
+	AddClass(javaLangSystemJclass);
 }
 
 function LoadClassAndExecute(mainClassHex, otherClassesHex) {
@@ -662,8 +718,7 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	}
 	let loadedClass = clresult.loadedClass;
 	let jclass = JClassFromLoadedClass(loadedClass);
-	LoadedClasses.push(jclass);
-	console.log("JVM: loaded class " + loadedClass.className);
+	AddClass(jclass);
 	let mainClass = jclass;
 	
 	// Load any auxiliary classes on offer.
@@ -673,8 +728,7 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 			return "error loading aux class " + i + "" + clresult.error;
 		}
 		jclass = JClassFromLoadedClass(clresult.loadedClass);
-		LoadedClasses.push(jclass);
-		console.log("JVM: loaded aux class " + clresult.loadedClass.className);
+		AddClass(jclass);
 	}
 	
 	var mainmethod = mainClass.mainEntryPointMethod();

@@ -68,15 +68,23 @@ function JLoadedClass(className, superclassName, constantPool, fields, methods, 
 		var descriptor = this.stringFromUtf8Constant(nameAndType.descriptor_index);
 		return { "className" : className, "fieldName": fieldName, "descriptor": descriptor };
 	}
-	
-	this.bootstrapMethodsAttribute = function() {
+		
+	this.attributeWithName = function(targetName) {
 		for (var i = 0; i < this.attributes.length; i++) {
 			var attr = this.attributes[i];
 			var nameIndex = attr.attribute_name_index;
 			var name = this.stringFromUtf8Constant(nameIndex);
-			if (name == "BootstrapMethods") {
+			if (name == targetName) {
 				return attr;
 			}
+		}
+		return null;
+	}
+	
+	this.sourceFileName = function() {
+		let sourceFileAttr = this.attributeWithName("SourceFile");
+		if (sourceFileAttr) {
+			return this.stringFromUtf8Constant(sourceFileAttr.sourcefile_index);
 		}
 		return null;
 	}
