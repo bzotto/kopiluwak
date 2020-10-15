@@ -14,8 +14,7 @@ function JClass(loadedClass) {
 	// static data
 	this.fieldVals = {};			// keyed by name: value
 	this.isInitialized = false;
-	
-	
+		
 	this.createInstance = function() {
 		var jobj = new JObj(this);
 		

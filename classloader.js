@@ -131,10 +131,16 @@ function KLClassLoader(classFileHexStringOrBytes) {
 			let codeLength = readU4();
 			info["code"] = readU1Array(codeLength);
 			let exceptionTableLength = readU2();
+			let exceptionTable = [];
 			for (let i = 0; i < exceptionTableLength; i++) {
-				// XXX
-				skipReadBytes(8);
+				let exception = {};
+				exception["start_pc"] = readU2();
+				exception["end_pc"] = readU2();
+				exception["handler_pc"] = readU2();
+				exception["catch_type"] = readU2();
+				exceptionTable.push(exception);
 			}
+			info["exception_table"] = exceptionTable;
 			let attributesCount = readU2();
 			let codeAttributes = [];
 			for (let i = 0; i < attributesCount; i++) {
