@@ -9,56 +9,90 @@
 // Resolved classes
 var LoadedClasses = [];
 
-function AddClass(loadedClass) {
-	// Ensure that the superclass chain is already loaded.
-	let current = loadedClass.superclassName;
-	while (current) {
-		let superclass = ResolveClass(current);
+function AddClass(jclass) {
+	if (jclass.superclassName) {
+		// Find the superclass to ensure that the chain above is already loaded.
+		let superclass = ResolveClass(jclass.superclassName);
+	
 		if (!superclass) {
-			console.log("JVM: Warning: Loading " + loadedClass.className + " without superclass " + current);
-			break;
+			console.log("JVM: Cannot load " + jclass.className + " before superclass " + jclass.superclassName);
+			return;
 		}
-		current = superclass.superclassName;
+	
+		jclass.superclass = superclass;
 	}
-
-	LoadedClasses.push(loadedClass);	
-	console.log("JVM: Loaded class " + loadedClass.className);
+	LoadedClasses.push(jclass);	
+	console.log("JVM: Loaded class " + jclass.className);
 }
 
 function ResolveClass(className) {
-	var jclass = null;
+	if (!className) {
+		return null;
+	}
+	
 	for (var i = 0; i < LoadedClasses.length; i++) {
 		var loadedClass = LoadedClasses[i];
 		if (loadedClass.className == className) {
-			jclass = loadedClass;
-			break;
+			return loadedClass;
 		}
 	}
 	
-	if (jclass == null) {
-		console.log("ERROR: Failed to resolve class " + className);
-	}
-	return jclass;
+	console.log("ERROR: Failed to resolve class " + className);
+	return null;
 }
 
-function ResolveMethodReference(methodInfo) {
-	let jclass = ResolveClass(methodInfo.className);
-	
-	if (jclass == null) {
-		console.log("ERROR: Failed to resolve class " + methodInfo.className);
-		return {};
+function IsClassASubclassOf(className1, className2) {
+	let targetClass = ResolveClass(className1);
+	if (!targetClass) {
+		//??
+		return false;
 	}
 	
-	let methodIdentifier = methodInfo.methodName + "#" + methodInfo.descriptor;
+	let superclass = targetClass.superclass;
+	while (superclass) {
+		if (superclass.className == className2) {
+			return true;
+		}
+		superclass = superclass.superclass;
+	}
 	
-	var methodRef = jclass.methods[methodIdentifier];
+	return false;
+}
+
+function ResolveMethodReference(methodInfo, contextClass) {
+	// In general, we look for the method directly in the vtable of the contextClass, which is how overidden
+	// methods are implemented here, with each subclass getting a full vtable of its whole inheritance chain.
+
+	if (!contextClass) {
+		contextClass = ResolveClass(methodInfo.className);
+	}
+	
+	// Note that we don't resolve the method's own class, because we might be dealing with a subclass that the
+	// originating methodInfo doesn't know about. The vtable on subclasses should already be setup to match
+	// inherited methods.
+	let methodIdentifier = methodInfo.methodName + "#" + methodInfo.descriptor;
+	var methodRef = contextClass.vtable[methodIdentifier];
 	
 	if (!methodRef) {
 		console.log("ERROR: Failed to resolve method " + methodInfo.methodName + " in " + methodInfo.className + " with descriptor " + methodInfo.descriptor);
 		return {};
 	} 
 	
-	return { "jclass": jclass, "method": methodRef };	
+	return methodRef;
+}
+
+function FindMainMethodReference() {
+	let methodIdentifier = "main#([Ljava/lang/String;)V";
+	let methodRef = null;
+	
+	for (var i = 0; i < LoadedClasses.length; i++) {
+		var loadedClass = LoadedClasses[i];
+		methodRef = loadedClass.vtable[methodIdentifier];
+		if (methodRef && (methodRef.access & ACC_PUBLIC) && (methodRef.access & ACC_STATIC)) {
+			return methodRef;
+		}
+	}
+	return null;
 }
 
 function ResolveFieldReference(fieldInfo) {
@@ -69,14 +103,23 @@ function ResolveFieldReference(fieldInfo) {
 		return {};
 	}
 	
-	var fieldRef = jclass.fields[fieldInfo.fieldName];
+	let fieldClass = jclass;
+	let fieldRef = fieldClass.fields[fieldInfo.fieldName];
+	while (!fieldRef && fieldClass.superclassName != null) {
+		fieldClass = ResolveClass(fieldClass.superclassName);
+		fieldRef = fieldClass.fields[fieldInfo.fieldName];
+	}
 		
+	// Fields match by name first, and then by desc. If we get a name match and fail 
+	// the desc match, it's a failure, even if in theory there may be a superclass which 
+	// defines a field with the same name and the correct type. 
 	if (!fieldRef || fieldRef.jtype.desc != fieldInfo.descriptor) {
-		console.log("ERROR: Failed to resolve field " + fieldInfo.fieldName + " in " + fieldInfo.className + " with descriptor " + fieldInfo.descriptor);
+		console.log("ERROR: Failed to resolve field " + fieldInfo.fieldName + " in " + 
+			fieldInfo.className + " with descriptor " + fieldInfo.descriptor);
 		return {};
 	}
 	
-	return { "jclass": jclass, "field": fieldRef };
+	return { "jclass": fieldClass, "field": fieldRef };
 }
 
 function Signed16bitValFromTwoBytes(val1, val2) {
@@ -129,9 +172,8 @@ function HandlerPcForException(jclass, currentPC, exceptionObj, exceptionTable) 
 	return -1;
 }
 
-function CreateStackFrame(jclass, method) {
+function CreateStackFrame(method) {
 	let frame = {};
-	frame.jclass = jclass;
 	frame.method = method;
 	frame.pc = 0;
 	frame.localVariables = [];
@@ -158,9 +200,9 @@ function DebugBacktrace(threadContext) {
 			}
 		}
 		// Is there a source file name?
-		let sourceFileName = frame.jclass.loadedClass.sourceFileName();
+		let sourceFileName = frame.method.jclass.loadedClass.sourceFileName();
 		
-		let fqmn = frame.jclass.className.replace(/\//g, ".") + "." + frame.method.name;
+		let fqmn = frame.method.jclass.className.replace(/\//g, ".") + "." + frame.method.name;
 		if (!sourceFileName) {
 			sourceFileName = "unknown";
 		}
@@ -176,33 +218,48 @@ function DebugBacktrace(threadContext) {
 	console.log(backtrace);
 }
 
-function RunJavaThreadWithMethod(jclass, method) {
+function RunJavaThreadWithMethod(method) {
 	var threadContext = {};
 	threadContext.stack = [];
 	
 	// Create the bottom frame. We won't execute this immediately, but it will be set up to be returned to.
-	let baseFrame = CreateStackFrame(jclass, method);
+	let baseFrame = CreateStackFrame(method);
 	threadContext.stack.unshift(baseFrame);
 	
 	// At the start of the thread, no classes have been initialized yet, trigger call to the <clinit> call for the current class.
-	let methodReference = ResolveMethodReference({ "className": jclass.className, "methodName": "<clinit>", "descriptor": "()V" });
-	let clinitFrame = CreateStackFrame(jclass, methodReference.method);	
+	let methodReference = ResolveMethodReference({ "className": method.jclass.className, "methodName": "<clinit>", "descriptor": "()V" }, method.jclass);
+	let clinitFrame = CreateStackFrame(methodReference);	
 	threadContext.stack.unshift(clinitFrame);
 	
 	while (threadContext.stack.length > 0) {
-		var executeNewFrame = false;
+		let executeNewFrame = false;
 		
 		// Get reference to the top frame which we're currently running, and start executing.
-		var frame = threadContext.stack[0];
-		var code = frame.method.code;
-		var pc = frame.pc;
+		// We get here for the very start of every method, and also upon return from callers.
+		let frame = threadContext.stack[0];
+		let code = frame.method.code;
+		let pc = frame.pc;
 		
-		// Is there a pending exception waiting for us?
+		// If this frame represents a method internal to the JVM, then execute it directly here. 
+		// Locals are the args, and if the return type is not void, the result is pushed onto the callers
+		// operand stack, as if it were a real method. 
+		if (code == null && frame.method.impl) {
+			let hasresult = (!frame.method.jmethod.returnType.isVoid());
+			let result = frame.method.impl.apply(null, frame.localVariables);
+			threadContext.stack.shift();
+			if (hasresult) {
+				threadContext.stack[0].operandStack.push(result);
+			}
+			continue;
+		}
+		
+		// If there's a pending exception in this frame, look for a handler for it at our current
+		// pc and either go there first, or continue down the stack. 
 		if (frame.pendingException) {
 			let exception = frame.pendingException;
 			frame.pendingException = null;
 			
-			let handlerPC = HandlerPcForException(frame.jclass, pc, exception, frame.method.exceptions);
+			let handlerPC = HandlerPcForException(frame.method.jclass, pc, exception, frame.method.exceptions);
 			if (handlerPC >= 0) {
 				// We can handle this one. Blow away the stack and jump to the handler.
 				pc = handlerPC;
@@ -213,14 +270,20 @@ function RunJavaThreadWithMethod(jclass, method) {
 				threadContext.stack[0].pendingException = exception;
 				continue;
 			}
-		} 		
+		} 	
 		
+		// If we're entering a method, say what it is
+		if (pc == 0) {
+			// console.log("--> Entering " + frame.method.jclass.className + "." + frame.method.name);
+		}	
+				
+		// Enter the primary execution loop		
 		while (pc < code.length) {
-			// update this before executing so it's present in case we want to dump the user stack
+			// update this before executing so it's present in case we need to dump the user stack
 			frame.pc = pc;       
 			
-			var opcode = code[pc];
-			var nextPc;
+			let opcode = code[pc];
+			let nextPc;
 	
 			switch (opcode) {
 			case 0x02: // iconst_m1
@@ -238,16 +301,16 @@ function RunJavaThreadWithMethod(jclass, method) {
 				}
 			case 0x10: // bipush
 				{
-					var byte = code[pc+1];
+					let byte = code[pc+1];
 					frame.operandStack.push(byte);
 					nextPc = pc + 2;
 					break;
 				}
 			case 0x12: // ldc
 				{
-					var index = code[pc+1];
-					var constref = frame.jclass.loadedClass.constantPool[index];
-					var str = frame.jclass.loadedClass.stringFromUtf8Constant(constref.string_index);
+					let index = code[pc+1];
+					let constref = frame.method.jclass.loadedClass.constantPool[index];
+					let str = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.string_index);
 					frame.operandStack.push(str);
 					nextPc = pc + 2;
 					break;
@@ -290,35 +353,35 @@ function RunJavaThreadWithMethod(jclass, method) {
 				}
 			case 0x3C: // istore_1
 				{
-					var ival = frame.operandStack.pop();
+					let ival = frame.operandStack.pop();
 					frame.localVariables[1] = ival;
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x3D: // istore_2
 				{
-					var ival = frame.operandStack.pop();
+					let ival = frame.operandStack.pop();
 					frame.localVariables[2] = ival;
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x4C: // astore_1
 				{
-					var aval = frame.operandStack.pop();
+					let aval = frame.operandStack.pop();
 					frame.localVariables[1] = aval;
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x4D: // astore_2
 				{
-					var aval = frame.operandStack.pop();
+					let aval = frame.operandStack.pop();
 					frame.localVariables[2] = aval;
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x59: // dup
 				{
-					var val = frame.operandStack.pop();
+					let val = frame.operandStack.pop();
 					frame.operandStack.push(val);
 					frame.operandStack.push(val);
 					nextPc = pc + 1;
@@ -326,9 +389,9 @@ function RunJavaThreadWithMethod(jclass, method) {
 				}
 			case 0x60: // iadd
 				{
-					var add2 = frame.operandStack.pop();
-					var add1 = frame.operandStack.pop();
-					var res = add1 + add2;
+					let add2 = frame.operandStack.pop();
+					let add1 = frame.operandStack.pop();
+					let res = add1 + add2;
 					frame.operandStack.push(res);
 					nextPc = pc + 1;
 					break;
@@ -377,7 +440,7 @@ function RunJavaThreadWithMethod(jclass, method) {
 				}
 			case 0xAC: // ireturn
 				{
-					var ival = frame.operandStack.pop();
+					let ival = frame.operandStack.pop();
 					// blow away all the other frame state.
 					threadContext.stack.shift();
 					// push the return value onto the caller's stack
@@ -387,131 +450,138 @@ function RunJavaThreadWithMethod(jclass, method) {
 				}
 			case 0xB1: // return 
 				{
-					// blow away all the other frame state.
 					threadContext.stack.shift();
 					executeNewFrame = true;
 					break;
 				}
 			case 0xB2: // getstatic
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
 					// Resolve a static field for this index. 
-					var fieldInfo = frame.jclass.loadedClass.fieldInfoFromIndex(index);
-					var fieldRef = ResolveFieldReference(fieldInfo);  // returns {jclass, field reference}
-					// Get the value of the static field:
-					var fieldValue = fieldRef.jclass.fieldVals[fieldInfo.fieldName];
+					let fieldInfo = frame.method.jclass.loadedClass.fieldInfoFromIndex(index);
+					let fieldRef = ResolveFieldReference(fieldInfo);  // returns {jclass, field reference}
+					// Get the value of the static field XXXX
+					let fieldValue = fieldRef.jclass.fieldVals[fieldInfo.fieldName];
 					frame.operandStack.push(fieldValue);
 					nextPc = pc + 3;
 					break;
 				}
 			case 0xB3: // putstatic
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
 					// Resolve a static field for this index. 
-					var fieldInfo = frame.jclass.loadedClass.fieldInfoFromIndex(index);
-					var fieldRef = ResolveFieldReference(fieldInfo);  // returns {jclass, field reference}
-					var fieldValue = frame.operandStack.pop();
+					let fieldInfo = frame.method.jclass.loadedClass.fieldInfoFromIndex(index);
+					let fieldRef = ResolveFieldReference(fieldInfo);  // returns {jclass, field reference}
+					let fieldValue = frame.operandStack.pop();
 					fieldRef.jclass.fieldVals[fieldInfo.fieldName] = fieldValue;
 					nextPc = pc + 3;
 					break;
 				}
 			case 0xB4: // getfield
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
-					var fieldInfo = frame.jclass.loadedClass.fieldInfoFromIndex(index);
-					var fieldRef = ResolveFieldReference(fieldInfo);
-					var jobj = frame.operandStack.pop();
-					var val = jobj.fieldVals[fieldInfo.fieldName];
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let fieldInfo = frame.method.jclass.loadedClass.fieldInfoFromIndex(index);
+					let fieldRef = ResolveFieldReference(fieldInfo);
+					let jobj = frame.operandStack.pop();
+					let val = jobj.fieldValsByClass[fieldInfo.className][fieldInfo.fieldName];
 					frame.operandStack.push(val);
 					nextPc = pc + 3;
 					break;
 				}
 			case 0xB5: // putfield
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
-					var fieldInfo = frame.jclass.loadedClass.fieldInfoFromIndex(index);
-					var fieldRef = ResolveFieldReference(fieldInfo);
-					var val = frame.operandStack.pop();
-					var jobj = frame.operandStack.pop();
-					jobj.fieldVals[fieldInfo.fieldName] = val;
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let fieldInfo = frame.method.jclass.loadedClass.fieldInfoFromIndex(index);
+					let fieldRef = ResolveFieldReference(fieldInfo);
+					let val = frame.operandStack.pop();
+					let jobj = frame.operandStack.pop();
+					jobj.fieldValsByClass[fieldInfo.className][fieldInfo.fieldName] = val;
 					nextPc = pc + 3;
 					break;
 				}
 			case 0xB6: // invokevirtual
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
-					var methodInfo = frame.jclass.loadedClass.methodInfoFromIndex(index);
-					var methodRef = ResolveMethodReference(methodInfo);  // returns {jclass, method reference}
-					var nargs = methodRef.method.jmethod.parameterTypes.length;
-					var args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
-					var jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let methodInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(index);
+					// Build descriptor so we know how to find the target object.
+					let jmethod = new JMethod(methodInfo.descriptor);
+					let nargs = jmethod.parameterTypes.length;
+					let args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
+					let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
 					args.unshift(jobj);
+					// Resolve the method, using the target object's class.
 					
-					if (methodRef.method.impl != null) {
-						var rval = methodRef.method.impl.apply(null, args);
-						nextPc = pc + 3;
-					} else {
-						let childFrame = CreateStackFrame(methodRef.jclass, methodRef.method);		
-						childFrame.localVariables = args;
-						
-						// Save the current next-PC state.
-						frame.pc = pc + 3;
-					
-						threadContext.stack.unshift(childFrame);
-						// Break out of this execution loop.
-						executeNewFrame = true;						
+					// If the method being requested is in a superclass of the *currently executing* method's class,
+					// then it represents an explicit or implicit call into a superclass, which means that we *don't*
+					// want to take overrides into account.
+					let contextClass = jobj.jclass;
+					if (IsClassASubclassOf(frame.method.jclass.className, methodInfo.className)) {
+						contextClass = null;
 					}
+					let methodRef = ResolveMethodReference(methodInfo, contextClass);  
+					
+					let childFrame = CreateStackFrame(methodRef);		
+					childFrame.localVariables = args;
+					
+					// Save the current next-PC state.
+					frame.pc = pc + 3;
 				
+					threadContext.stack.unshift(childFrame);
+					executeNewFrame = true;						
 					break;				
 				}
 			case 0xB7: // invokespecial
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
-					var methodInfo = frame.jclass.loadedClass.methodInfoFromIndex(index);
-					var methodRef = ResolveMethodReference(methodInfo);  // returns {jclass, method reference}
-					var nargs = methodRef.method.jmethod.parameterTypes.length;
-					var args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
-					var jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let methodInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(index);
+					// Build descriptor so we know how to find the target object.
+					let jmethod = new JMethod(methodInfo.descriptor);
+					let nargs = jmethod.parameterTypes.length;
+					let args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
+					let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
 					args.unshift(jobj);
+					// Resolve the method, using the target object's class.
 					
-					if (methodRef.method.impl != null) {
-						var rval = methodRef.method.impl.apply(null, args);
-						nextPc = pc + 3;
-					} else {
-						let childFrame = CreateStackFrame(methodRef.jclass, methodRef.method);		
-						childFrame.localVariables = args;
-						
-						// Save the current next-PC state.
-						frame.pc = pc + 3;
+					// If the method being requested is in a superclass of the *currently executing* method's class,
+					// then it represents an explicit or implicit call into a superclass, which means that we *don't*
+					// want to take overrides into account.
+					let contextClass = jobj.jclass;
+					if (IsClassASubclassOf(frame.method.jclass.className, methodInfo.className)) {
+						contextClass = null;
+					}
+					let methodRef = ResolveMethodReference(methodInfo, contextClass);  
+					let childFrame = CreateStackFrame(methodRef);		
+					childFrame.localVariables = args;
 					
-						threadContext.stack.unshift(childFrame);
-						// Break out of this execution loop.
-						executeNewFrame = true;						
-					}				
+					// Save the current next-PC state.
+					frame.pc = pc + 3;
+				
+					threadContext.stack.unshift(childFrame);
+					executeNewFrame = true;						
 					break;
 				}
 			case 0xB8: // invokestatic
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
 					// Resolve a static method for this index. 
-					var methodInfo = frame.jclass.loadedClass.methodInfoFromIndex(index);
-					var methodRef = ResolveMethodReference(methodInfo);  // returns {jclass, method reference}
+					let methodInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(index);
+					let methodRef = ResolveMethodReference(methodInfo, frame.method.jclass);  // wrong class! XXX
 
-					let childFrame = CreateStackFrame(methodRef.jclass, methodRef.method);		
+					let childFrame = CreateStackFrame(methodRef);		
 					childFrame.localVariables = frame.operandStack.slice();
 					
 					// Save the current next-PC state.
@@ -528,7 +598,7 @@ function RunJavaThreadWithMethod(jclass, method) {
 					if (!ObjectIsA(throwable, "java/lang/Throwable")) {
 						console.log("JVM: Can't throw object of class " + throwable.jclass.className);
 					}
-					let handlerPc = HandlerPcForException(frame.jclass, pc, throwable, frame.method.exceptions);
+					let handlerPc = HandlerPcForException(frame.method.jclass, pc, throwable, frame.method.exceptions);
 					if (handlerPc >= 0) {
 						nextPc = handlerPc;
 						frame.operandStack = [throwable];
@@ -543,21 +613,21 @@ function RunJavaThreadWithMethod(jclass, method) {
 				}
 			case 0xBA: // invokedynamic
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
 					// get the constant entry for the invokedynamic
-					var cdynamic = frame.jclass.loadedClass.constantPool[index];
-					var bootstrapIndex = cdynamic.bootstrap_method_attr_index;
-					var bootstrapAttr = frame.jclass.loadedClass.attributeWithName("BootstrapMethods");
-					var bootstrap = bootstrapAttr.bootstrap_methods[bootstrapIndex];
-					var bootstrapMethodRef = bootstrap.bootstrap_method_ref;
-					var bootstrapArgs = bootstrap.bootstrap_arguments;
-					var methodHandle = frame.jclass.loadedClass.constantPool[bootstrapMethodRef];
+					let cdynamic = frame.method.jclass.loadedClass.constantPool[index];
+					let bootstrapIndex = cdynamic.bootstrap_method_attr_index;
+					let bootstrapAttr = frame.method.jclass.loadedClass.attributeWithName("BootstrapMethods");
+					let bootstrap = bootstrapAttr.bootstrap_methods[bootstrapIndex];
+					let bootstrapMethodRef = bootstrap.bootstrap_method_ref;
+					let bootstrapArgs = bootstrap.bootstrap_arguments;
+					let methodHandle = frame.method.jclass.loadedClass.constantPool[bootstrapMethodRef];
 					if (methodHandle.reference_kind == REF_invokeStatic) {
 						// We expect the other field in the handle to reference a methodrefinfo
-						var methodRefInfo = frame.jclass.loadedClass.methodInfoFromIndex(methodHandle.reference_index);
-						var methodRef = ResolveMethodReference(methodRefInfo);  // returns {jclass, method reference}
+						let methodRefInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(methodHandle.reference_index);
+						let methodRef = ResolveMethodReference(methodRefInfo, frame.method.jclass);  // returns {jclass, method reference}
 						
 						
 					} else {
@@ -569,19 +639,19 @@ function RunJavaThreadWithMethod(jclass, method) {
 				}
 			case 0xBB: // new
 				{
-					var indexbyte1 = code[pc+1];
-					var indexbyte2 = code[pc+2];
-					var index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
-					var classRef = frame.jclass.loadedClass.constantPool[index];
-					var className = frame.jclass.loadedClass.stringFromUtf8Constant(classRef.name_index);
-					var jclass = ResolveClass(className);
-					var jObj = jclass.createInstance();
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let classRef = frame.method.jclass.loadedClass.constantPool[index];
+					let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(classRef.name_index);
+					let jclass = ResolveClass(className);
+					let jObj = jclass.createInstance();
 					frame.operandStack.push(jObj);
 					nextPc = pc + 3;
 					break;
 				}
 			default:
-				console.log("UNSUPPORTED OPCODE " + opcode + " at PC = " + pc);
+				console.log("JVM: Internal error: Unsupported opcode " + opcode + " at PC = " + pc);
 				return 0;
 			}
 			
@@ -600,6 +670,11 @@ function RunJavaThreadWithMethod(jclass, method) {
 function JClassFromLoadedClass(loadedClass) {
 	let jclass = new JClass(loadedClass);
 	
+	// The vtable for each class starts out as a copy of its superclass's vtable, if there
+	// is one.
+	let jsuperclass = ResolveClass(jclass.superclassName);	
+	jclass.vtable = jsuperclass ? Object.assign({}, jsuperclass.vtable) : {};
+
 	// Walk the methods in the class and patch them up.
 	for (let i = 0; i < loadedClass.methods.length; i++) {
 		let method = loadedClass.methods[i];
@@ -633,8 +708,10 @@ function JClassFromLoadedClass(loadedClass) {
 			}
 		}
 		
-		jclass.methods[methodIdentifier] = { 
+		// The implementing jclass is included because the vtable gets copied to subclasses upon load.
+		jclass.vtable[methodIdentifier] = { 
 			"name": name, 
+			"jclass": jclass,
 			"jmethod": new JMethod(desc), 
 			"access": access_flags, 
 			"impl": null, 
@@ -662,7 +739,12 @@ function InjectOutputMockObjects() {
 	// Object
 	var javaLangObjectLoadedClass = new JLoadedClass("java/lang/Object", null, [], [], [], []);
 	var javaLangObjectJclass = new JClass(javaLangObjectLoadedClass);
-	javaLangObjectJclass.methods["<init>#()V"] = { "name": "<init>", "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 
+	javaLangObjectJclass.vtable["<clinit>#()V"] = { "name": "<clinit>", "jclass": javaLangObjectJclass, "jmethod": new JMethod("()V"), "access": ACC_PUBLIC|ACC_STATIC, "code": null, "impl": 
+		function(jobj) {
+			console.log("java.lang.Object <clinit> invoked");
+		}
+	};
+	javaLangObjectJclass.vtable["<init>#()V"] = { "name": "<init>", "jclass": javaLangObjectJclass, "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 
 		function(jobj) {
 			console.log("java.lang.Object <init> invoked");
 		}
@@ -676,7 +758,7 @@ function InjectOutputMockObjects() {
 	
 	var javaLangExceptionLoadedClass = new JLoadedClass("java/lang/Exception", "java/lang/Throwable", [], [], [], []);
 	var javaLangExceptionJClass = new JClass(javaLangExceptionLoadedClass);
-	javaLangExceptionJClass.methods["<init>#()V"] = { "name": "<init>", "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 		
+	javaLangExceptionJClass.vtable["<init>#()V"] = { "name": "<init>", "jclass": javaLangExceptionJClass, "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 		
 	function(jobj) {
 			console.log("java.lang.Exception <init> invoked");
 		}
@@ -684,14 +766,14 @@ function InjectOutputMockObjects() {
 	AddClass(javaLangExceptionJClass);
 	
 	// Stuff that lets us print stuff to the console. 
-	var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/io/FilterOutputStream", [], [], [], []);
+	var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/lang/Object", [], [], [], []);
 	var javaIoPrintStreamJclass = new JClass(javaIoPrintStreamLoadedClass);
-	javaIoPrintStreamJclass.methods["println#(Ljava/lang/String;)V"] = { "name": "println", "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl": 
+	javaIoPrintStreamJclass.vtable["println#(Ljava/lang/String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl": 
 		function(jobj, x) { 
 			console.log(x);
 		}
 	};
-	javaIoPrintStreamJclass.methods["println#(I)V"] = { "name": "println", "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl": 
+	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl": 
 		function(jobj, x) { 
 			console.log(x);
 		}
@@ -701,7 +783,8 @@ function InjectOutputMockObjects() {
 	
 	var javaLangSystemLoadedClass = new JLoadedClass("java/lang/System", "java/lang/Object", [], [], [], []);
 	var javaLangSystemJclass = new JClass(javaLangSystemLoadedClass);
-	javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava/io/PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC, "value": systemOutStreamObj};
+	javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava/io/PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
+	javaLangSystemJclass.fieldVals["out"] = systemOutStreamObj;
 	AddClass(javaLangSystemJclass);
 }
 
@@ -731,9 +814,10 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 		AddClass(jclass);
 	}
 	
-	var mainmethod = mainClass.mainEntryPointMethod();
-	if (mainmethod) {
-		RunJavaThreadWithMethod(mainClass, mainmethod);
+	// one of these classes has a main method in it, find it.	
+	var methodRef = FindMainMethodReference();
+	if (methodRef) {
+		RunJavaThreadWithMethod(methodRef);
 	} else {
 		return "Didn't find main method entry point"
 	}

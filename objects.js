@@ -1,15 +1,23 @@
 function JObj(jclass) {
 	this.jclass = jclass;
-	this.fieldVals = {};			// keyed by name: value
+	this.fieldValsByClass = {};			// keyed by classname:{name:value}
+	
+	// Set up the field val class buckets.
+	let curclass = jclass;
+	do {
+		this.fieldValsByClass[curclass.className] = {};
+		curclass = curclass.superclass;
+ 	} while (curclass);
 }
 
 function JClass(loadedClass) {
 	this.loadedClass = loadedClass;
+	this.superclass;
 	this.className = loadedClass.className;
 	this.superclassName = loadedClass.superclassName;
 	
 	this.fields = {};			// keyed by name, { jtype: JType, access: access }
-	this.methods = {};			// keyed by name, { jmethod: JMethod, access: access, impl:  function }
+	this.vtable = {};			// keyed by identifer, { jmethod: JMethod, access: access, impl:  function }
 	
 	// static data
 	this.fieldVals = {};			// keyed by name: value
@@ -18,20 +26,9 @@ function JClass(loadedClass) {
 	this.createInstance = function() {
 		var jobj = new JObj(this);
 		
-		// Create the instance fields and methods from the non-static entries in the class data.
 		
+				
 		return jobj;
-	}
-
-	this.mainEntryPointMethod = function() {
-		var mainMethod = this.methods["main#([Ljava/lang/String;)V"];
-		if (mainMethod) {
-			var access_flags = mainMethod.access;
-			if ((access_flags & ACC_PUBLIC) && (access_flags & ACC_STATIC)) {
-				return mainMethod;
-			}
-		}
-		return null;
 	}
 }
 
