@@ -25,6 +25,31 @@ function AddClass(jclass) {
 	console.log("JVM: Loaded class " + jclass.className);
 }
 
+function LoadClassFromJDK(className) {
+	if (KLJDKClasses) {
+		let fqcn = className.replace(/\//g, ".");
+		let classFileBase64 = KLJDKClasses[fqcn];
+		if (classFileBase64) {
+			let binaryStr = atob(classFileBase64);
+			let len = binaryStr.length;
+			let bytes = [];
+		    for (let i = 0; i < len; i++)        {
+		        bytes[i] = binaryStr.charCodeAt(i);
+		    }
+			let classLoader = new KLClassLoader();
+			let clresult = classLoader.loadFromData(bytes);
+			if (clresult.error) {
+				console.log("ERROR: Failed to load JDK class " + className + ": " + clresult.error);
+				return null;
+			}
+			let loadedClass = clresult.loadedClass;
+			let jclass = JClassFromLoadedClass(loadedClass);
+			return jclass;
+		}
+	}
+	return null;
+}
+	
 function ResolveClass(className) {
 	if (!className) {
 		return null;
@@ -37,6 +62,12 @@ function ResolveClass(className) {
 		}
 	}
 	
+	// Class was not present. Look in the JDK library.
+	let jdkClass = LoadClassFromJDK(className);
+	if (jdkClass) {
+		AddClass(jdkClass);
+		return jdkClass;
+	}
 	console.log("ERROR: Failed to resolve class " + className);
 	return null;
 }
@@ -75,7 +106,7 @@ function ResolveMethodReference(methodInfo, contextClass) {
 	
 	if (!methodRef) {
 		console.log("ERROR: Failed to resolve method " + methodInfo.methodName + " in " + methodInfo.className + " with descriptor " + methodInfo.descriptor);
-		return {};
+		return null;
 	} 
 	
 	return methodRef;
@@ -226,10 +257,13 @@ function RunJavaThreadWithMethod(method) {
 	let baseFrame = CreateStackFrame(method);
 	threadContext.stack.unshift(baseFrame);
 	
-	// At the start of the thread, no classes have been initialized yet, trigger call to the <clinit> call for the current class.
+	// At the start of the thread, no classes have been initialized yet, trigger call to the <clinit> call for the current class, if such
+	// an initializer exists.
 	let methodReference = ResolveMethodReference({ "className": method.jclass.className, "methodName": "<clinit>", "descriptor": "()V" }, method.jclass);
-	let clinitFrame = CreateStackFrame(methodReference);	
-	threadContext.stack.unshift(clinitFrame);
+	if (methodReference) {
+		let clinitFrame = CreateStackFrame(methodReference);	
+		threadContext.stack.unshift(clinitFrame);
+	}
 	
 	while (threadContext.stack.length > 0) {
 		let executeNewFrame = false;
@@ -379,6 +413,12 @@ function RunJavaThreadWithMethod(method) {
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x57: // pop
+				{
+					frame.operandStack.pop();
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x59: // dup
 				{
 					let val = frame.operandStack.pop();
@@ -447,6 +487,14 @@ function RunJavaThreadWithMethod(method) {
 					threadContext.stack[0].operandStack.push(ival);
 					executeNewFrame = true;
 					break;
+				}
+			case 0xB0: // areturn
+				{
+					let aval = frame.operandStack.pop();
+					threadContext.stack.shift();
+					threadContext.stack[0].operandStack.push(aval);
+					executeNewFrame = true;
+					break;					
 				}
 			case 0xB1: // return 
 				{
@@ -650,6 +698,32 @@ function RunJavaThreadWithMethod(method) {
 					nextPc = pc + 3;
 					break;
 				}
+			case 0xC6: // ifnull
+				{
+					let branchbyte1 = code[pc+1];
+					let branchbyte2 = code[pc+2];
+					let offset = Signed16bitValFromTwoBytes(branchbyte1, branchbyte2);
+					let val = frame.operandStack.pop();
+					if (val == null) {
+						nextPc = pc + offset; // hm
+					} else {
+						nextPc = pc + 3;
+					}
+					break;
+				}
+			case 0xC7: // ifnonnull
+				{
+					let branchbyte1 = code[pc+1];
+					let branchbyte2 = code[pc+2];
+					let offset = Signed16bitValFromTwoBytes(branchbyte1, branchbyte2);
+					let val = frame.operandStack.pop();
+					if (val != null) {
+						nextPc = pc + offset; // hm
+					} else {
+						nextPc = pc + 3;
+					}
+					break;
+				}
 			default:
 				console.log("JVM: Internal error: Unsupported opcode " + opcode + " at PC = " + pc);
 				return 0;
@@ -735,36 +809,7 @@ function JClassFromLoadedClass(loadedClass) {
 }
 
 function InjectOutputMockObjects() {
-	
-	// Object
-	var javaLangObjectLoadedClass = new JLoadedClass("java/lang/Object", null, [], [], [], []);
-	var javaLangObjectJclass = new JClass(javaLangObjectLoadedClass);
-	javaLangObjectJclass.vtable["<clinit>#()V"] = { "name": "<clinit>", "jclass": javaLangObjectJclass, "jmethod": new JMethod("()V"), "access": ACC_PUBLIC|ACC_STATIC, "code": null, "impl": 
-		function(jobj) {
-			console.log("java.lang.Object <clinit> invoked");
-		}
-	};
-	javaLangObjectJclass.vtable["<init>#()V"] = { "name": "<init>", "jclass": javaLangObjectJclass, "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 
-		function(jobj) {
-			console.log("java.lang.Object <init> invoked");
-		}
-	};
-	AddClass(javaLangObjectJclass);
-	
-	// Throwable and Exception
-	var javaLangThrowableLoadedClass = new JLoadedClass("java/lang/Throwable", "java/lang/Object", [], [], [], []);
-	var javaLangThrowableJClass = new JClass(javaLangThrowableLoadedClass);
-	AddClass(javaLangThrowableJClass);
-	
-	var javaLangExceptionLoadedClass = new JLoadedClass("java/lang/Exception", "java/lang/Throwable", [], [], [], []);
-	var javaLangExceptionJClass = new JClass(javaLangExceptionLoadedClass);
-	javaLangExceptionJClass.vtable["<init>#()V"] = { "name": "<init>", "jclass": javaLangExceptionJClass, "jmethod": new JMethod("()V"), "access": ACC_PUBLIC, "code": null, "impl": 		
-	function(jobj) {
-			console.log("java.lang.Exception <init> invoked");
-		}
-	}
-	AddClass(javaLangExceptionJClass);
-	
+		
 	// Stuff that lets us print stuff to the console. 
 	var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/lang/Object", [], [], [], []);
 	var javaIoPrintStreamJclass = new JClass(javaIoPrintStreamLoadedClass);

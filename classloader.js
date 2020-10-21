@@ -68,23 +68,29 @@ function KLClassLoader(classFileHexStringOrBytes) {
 					break;
 				}
 			case CONSTANT_Fieldref:
-				{
-					info["class_index"] = readU2();
-					info["name_and_type_index"] = readU2();				
-					break;
-				}
 			case CONSTANT_Methodref:
+			case CONSTANT_InterfaceMethodref:
 				{
 					info["class_index"] = readU2();
-					info["name_and_type_index"] = readU2();				
-					break;
+					info["name_and_type_index"] = readU2();		
+					break;		
 				}
 			case CONSTANT_String:
 				{
 					info["string_index"] = readU2();
 					break;
 				}
-				
+			case CONSTANT_Integer:
+				{
+					info["bytes"] = readU4(); // = actual value
+					break;
+				}
+			case CONSTANT_Long:
+				{
+					info["high_bytes"] = readU4();
+					info["low_bytes"] = readU4();
+					break;
+				}
 			case CONSTANT_NameAndType:
 				{
 					info["name_index"] = readU2();
@@ -111,7 +117,7 @@ function KLClassLoader(classFileHexStringOrBytes) {
 					break;
 				}
 		default:
-			
+			console.log("classloader: unsupported constant type " + tag);
 			return null;
 		}
 	
@@ -238,6 +244,12 @@ function KLClassLoader(classFileHexStringOrBytes) {
 				return { "error": "Failed to parse constant pool" };
 			} 
 			ConstantPool[i] = cpEntry;
+			
+			// long and double constants "take up" two indexes in the constant pool for some godforsaken reason
+			// so if this is one of those types, then skip an extra index. jfc.
+			if (cpEntry.tag == CONSTANT_Long || cpEntry.tag == CONSTANT_Double) {
+				i++;
+			}
 		}
 	
 		let accessFlags = readU2();
@@ -254,7 +266,7 @@ function KLClassLoader(classFileHexStringOrBytes) {
 			if (interfaceCpEntry.tag != CONSTANT_Class) {
 				return { "error": "Interface index doesn't point to a class info constant" };
 			}
-			interfaces.push(readU2());
+			interfaces.push(interfaceCpEntry);
 		}
 		
 		let fieldsCount = readU2();
@@ -289,7 +301,7 @@ function KLClassLoader(classFileHexStringOrBytes) {
 		}
 
 		let className = stringFromUtf8Constant(ConstantPool[thisClass].name_index);
-		let superClassName = stringFromUtf8Constant(ConstantPool[superClass].name_index);
+		let superClassName = superClass == 0 ? null : stringFromUtf8Constant(ConstantPool[superClass].name_index);
 
 		// XXX: we parsed interfaces and access flags but aren't yet using them here.
 		
