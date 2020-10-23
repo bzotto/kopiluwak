@@ -468,6 +468,19 @@ function RunJavaThreadWithMethod(startupMethod) {
 					case CONSTANT_String:
 						val = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.string_index);
 						break;
+					case CONSTANT_Integer:
+						val = constref.bytes;
+						break;
+					case CONSTANT_Float:
+						{
+							let bits = constref.bytes;
+							let sign = ((bits >>> 31) == 0) ? 1.0 : -1.0;
+							let e = ((bits >>> 23) & 0xff);
+							let m = (e == 0) ? (bits & 0x7fffff) << 1 : (bits & 0x7fffff) | 0x800000;
+							let f = sign * m * Math.pow(2, e - 150);
+							val = f;
+							break;
+						}
 					default:
 						alert("ldc needs a new case for constant " + constref.tag);
 					}
@@ -478,66 +491,44 @@ function RunJavaThreadWithMethod(startupMethod) {
 					break;
 				}
 			case 0x1A: // iload_0
-				{
-					frame.operandStack.push(frame.localVariables[0]);
-					nextPc = pc + 1;
-					break;
-				}
 			case 0x1B: // iload_1
-				{
-					frame.operandStack.push(frame.localVariables[1]);
-					nextPc = pc + 1;
-					break;
-				}
 			case 0x1C: // iload_2
+			case 0x1D: // iload_3
 				{
-					frame.operandStack.push(frame.localVariables[2]);
+					let pos = opcode - 0x1A;
+					frame.operandStack.push(frame.localVariables[pos]);
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x2A: // aload_0
-				{
-					frame.operandStack.push(frame.localVariables[0]);
-					nextPc = pc + 1;
-					break;
-				}
 			case 0x2B: // aload_1
-				{
-					frame.operandStack.push(frame.localVariables[1]);
-					nextPc = pc + 1;
-					break;
-				}				
 			case 0x2C: // aload_2
+			case 0x2D: // aload_3
 				{
-					frame.operandStack.push(frame.localVariables[2]);
+					let pos = opcode - 0x2A;
+					frame.operandStack.push(frame.localVariables[pos]);
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x3B: // istore_0
 			case 0x3C: // istore_1
-				{
-					let ival = frame.operandStack.pop();
-					frame.localVariables[1] = ival;
-					nextPc = pc + 1;
-					break;
-				}
 			case 0x3D: // istore_2
+			case 0x3E: // istore_3
 				{
+					let pos = opcode - 0x3B;
 					let ival = frame.operandStack.pop();
-					frame.localVariables[2] = ival;
+					frame.localVariables[pos] = ival;
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x4B: // astore_0
 			case 0x4C: // astore_1
-				{
-					let aval = frame.operandStack.pop();
-					frame.localVariables[1] = aval;
-					nextPc = pc + 1;
-					break;
-				}
 			case 0x4D: // astore_2
+			case 0x4E: // astore_3
 				{
+					let pos = opcode - 0x4B;
 					let aval = frame.operandStack.pop();
-					frame.localVariables[2] = aval;
+					frame.localVariables[pos] = aval;
 					nextPc = pc + 1;
 					break;
 				}
@@ -561,6 +552,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let add1 = frame.operandStack.pop();
 					let res = add1 + add2;
 					frame.operandStack.push(res);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x6C: // idiv
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let div = value1 / value2;
+					let intresult = Math.trunc(div);
+					frame.operandStack.push(intresult);
 					nextPc = pc + 1;
 					break;
 				}
@@ -685,7 +686,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 						frame.pc = pc;
 					} else {
 						// Get the value of the static field XXXX
-						let fieldValue = fieldRef.jclass.fieldVals[fieldInfo.fieldName];
+						let fieldValue = fieldRef.jclass.fieldValsByClass[fieldInfo.className][fieldInfo.fieldName];
 						frame.operandStack.push(fieldValue);
 						nextPc = pc + 3;
 					}
@@ -699,9 +700,17 @@ function RunJavaThreadWithMethod(startupMethod) {
 					// Resolve a static field for this index. 
 					let fieldInfo = frame.method.jclass.loadedClass.fieldInfoFromIndex(index);
 					let fieldRef = ResolveFieldReference(fieldInfo);  // returns {jclass, field reference}
-					let fieldValue = frame.operandStack.pop();
-					fieldRef.jclass.fieldVals[fieldInfo.fieldName] = fieldValue;
-					nextPc = pc + 3;
+					// Is the class in which the field lives intialized yet? 
+					if (fieldRef.jclass.state != JCLASS_STATE_INITIALIZED && (clinitFrame = CreateClassInitFrameIfNeeded(fieldRef.jclass))) {
+						fieldRef.jclass.state = JCLASS_STATE_INITIALIZING;
+						threadContext.stack.unshift(clinitFrame);
+						executeNewFrame = true;
+						frame.pc = pc;
+					} else {
+						let fieldValue = frame.operandStack.pop();
+						fieldRef.jclass.fieldValsByClass[fieldInfo.className][fieldInfo.fieldName] = fieldValue;
+						nextPc = pc + 3;
+					}
 					break;
 				}
 			case 0xB4: // getfield
@@ -742,6 +751,10 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
 					let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
 					args.unshift(jobj);
+					if (!jobj) {
+						console.log("Invoke virtual on a null jobj won't work...");
+						return;
+					}
 					// Resolve the method, using the target object's class.
 					
 					// If the method being requested is in a superclass of the *currently executing* method's class,
@@ -882,16 +895,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let classRef = frame.method.jclass.loadedClass.constantPool[index];
 					let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(classRef.name_index);
 					let jclass = ResolveClass(className);
-					let clinitFrame;
-					if (jclass.state != JCLASS_STATE_INITIALIZED && (clinitFrame = CreateClassInitFrameIfNeeded(jclass))) {
-						threadContext.stack.unshift(clinitFrame);
-						executeNewFrame = true;
-						frame.pc = pc;
-					} else {
-						let jObj = jclass.createInstance();
-						frame.operandStack.push(jObj);
-						nextPc = pc + 3;
-					}
+					let jObj = jclass.createInstance();
+					frame.operandStack.push(jObj);
+					nextPc = pc + 3;
+					break;
+				}
+			case 0xBE: // arraylength
+				{
+					let arrayref = frame.operandStack.pop();
+					frame.operandStack.push(arrayref.count);
+					nextPc = pc + 1;
 					break;
 				}
 			case 0xC6: // ifnull
@@ -1007,32 +1020,38 @@ function JClassFromLoadedClass(loadedClass) {
 function InjectOutputMockObjects() {
 		
 	// Stuff that lets us print stuff to the console. 
-	var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/lang/Object", [], [], [], []);
-	var javaIoPrintStreamJclass = new JClass(javaIoPrintStreamLoadedClass);
-	javaIoPrintStreamJclass.vtable["println#(Ljava/lang/String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
-		function(jobj, x) {
-			console.log(x);
-		}
-	};
-	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
-		function(jobj, x) {
-			console.log(x);
-		}
-	};
-	AddClass(javaIoPrintStreamJclass);
-	var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
-
-	var javaLangSystemLoadedClass = new JLoadedClass("java/lang/System", "java/lang/Object", [], [], [], []);
-	var javaLangSystemJclass = new JClass(javaLangSystemLoadedClass);
-	javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava/io/PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
-	javaLangSystemJclass.fieldVals["out"] = systemOutStreamObj;
-	AddClass(javaLangSystemJclass);
+	// var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/lang/Object", [], [], [], []);
+	// var javaIoPrintStreamJclass = new JClass(javaIoPrintStreamLoadedClass);
+	// javaIoPrintStreamJclass.vtable["println#(Ljava/lang/String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
+	// 	function(jobj, x) {
+	// 		console.log(x);
+	// 	}
+	// };
+	// javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
+	// 	function(jobj, x) {
+	// 		console.log(x);
+	// 	}
+	// };
+	// AddClass(javaIoPrintStreamJclass);
+	// var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
+	//
+	// var javaLangSystemLoadedClass = new JLoadedClass("java/lang/System", "java/lang/Object", [], [], [], []);
+	// var javaLangSystemJclass = new JClass(javaLangSystemLoadedClass);
+	// javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava/io/PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
+	// javaLangSystemJclass.fieldValsByClass["java/lang/System"]["out"] = systemOutStreamObj;
+	// AddClass(javaLangSystemJclass);
 }
 
 function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	
 	// Inject system crap so we don't need JDK for super simple tests
 	InjectOutputMockObjects();
+	
+	// Create the VM startup thread. 
+	let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
+	if (initPhase1Method) {
+		RunJavaThreadWithMethod(initPhase1Method);
+	}	
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();

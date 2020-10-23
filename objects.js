@@ -40,7 +40,7 @@ function JClass(loadedClass) {
 	this.vtable = {};			// keyed by identifer, { jmethod: JMethod, access: access, impl:  function }
 	
 	// static data
-	this.fieldVals = {};			// keyed by name: value
+	this.fieldValsByClass = {};	// keyed by classname:{name:value}
 	this.isInitialized = false;
 		
 	this.createInstance = function() {
@@ -50,6 +50,13 @@ function JClass(loadedClass) {
 				
 		return jobj;
 	}
+	
+	// Set up the field val class buckets.
+	let curclass = this;
+	do {
+		this.fieldValsByClass[curclass.className] = {};
+		curclass = curclass.superclass;
+ 	} while (curclass);
 }
 
 function JLoadedClass(className, superclassName, constantPool, fields, methods, attributes) {
