@@ -85,6 +85,11 @@ function KLClassLoader(classFileHexStringOrBytes) {
 					info["bytes"] = readU4(); // = actual value
 					break;
 				}
+			case CONSTANT_Float:
+				{
+					info["bytes"] = readU4(); // IEEE representation
+					break;
+				}
 			case CONSTANT_Long:
 				{
 					info["high_bytes"] = readU4();
@@ -110,6 +115,11 @@ function KLClassLoader(classFileHexStringOrBytes) {
 					info["reference_index"] = readU2();
 					break;
 				}
+			case CONSTANT_MethodType: 
+				{
+					info["descriptor_index"] = readU2();
+					break;
+				} 
 			case CONSTANT_InvokeDynamic:
 				{
 					info["bootstrap_method_attr_index"] = readU2();

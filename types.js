@@ -91,10 +91,3 @@ function JMethod(desc) {
 	// everything from here to the end of the method desc is the return type.
 	this.returnType = new JType(desc.substring(idx+1));
 }
-
-
-//
-// var doubleArr = new JType("[[[D");
-// var object = new JType("Ljava/lang/fooble;");
-// var method = new JMethod("(I[ILHelloWorld;)D");
-//

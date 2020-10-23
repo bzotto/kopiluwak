@@ -1,5 +1,10 @@
+const JOBJ_STATE_UNINITIALIZED = 0;
+const JOBJ_STATE_INITIALIZING  = 1;
+const JOBJ_STATE_INITIALIZED   = 2;
+
 function JObj(jclass) {
 	this.jclass = jclass;
+	this.state = JOBJ_STATE_UNINITIALIZED;
 	this.fieldValsByClass = {};			// keyed by classname:{name:value}
 	
 	// Set up the field val class buckets.
@@ -10,11 +15,26 @@ function JObj(jclass) {
  	} while (curclass);
 }
 
+function JArray(jclass, count) {
+	this.jclass = jclass;
+	this.count = count;
+	this.elements = [];
+	for (let i = 0; i < count; i++) {
+		this.elements[i] = null;
+	}
+}
+
+const JCLASS_STATE_UNINITIALIZED = 0;
+const JCLASS_STATE_INITIALIZING  = 1;
+const JCLASS_STATE_INITIALIZED   = 2;
+
 function JClass(loadedClass) {
 	this.loadedClass = loadedClass;
 	this.superclass;
 	this.className = loadedClass.className;
 	this.superclassName = loadedClass.superclassName;
+	
+	this.state = JCLASS_STATE_UNINITIALIZED;
 	
 	this.fields = {};			// keyed by name, { jtype: JType, access: access }
 	this.vtable = {};			// keyed by identifer, { jmethod: JMethod, access: access, impl:  function }

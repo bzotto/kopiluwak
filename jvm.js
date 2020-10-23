@@ -7,7 +7,8 @@
 //
 
 // Resolved classes
-var LoadedClasses = [];
+let LoadedClasses = [];
+let ClassesToJavaLangClass = {};
 
 function AddClass(jclass) {
 	if (jclass.superclassName) {
@@ -72,6 +73,19 @@ function ResolveClass(className) {
 	return null;
 }
 
+function JavaLangClassObjForClass(jclass) {
+	let jlcClass = ClassesToJavaLangClass[jclass];
+	if (!jlcClass) {
+		let classClass = ResolveClass("java/lang/Class");
+		if (!classClass) {
+			// throw??
+		}
+		jlcClass = classClass.createInstance();
+		ClassesToJavaLangClass[jclass] = jlcClass;
+	}
+	return jlcClass;
+}
+
 function IsClassASubclassOf(className1, className2) {
 	let targetClass = ResolveClass(className1);
 	if (!targetClass) {
@@ -124,6 +138,11 @@ function FindMainMethodReference() {
 		}
 	}
 	return null;
+}
+
+function ClassInitializationMethod(jclass) {
+	let methodIdentifier = "<clinit>#()V";
+	return jclass.vtable[methodIdentifier];
 }
 
 function ResolveFieldReference(fieldInfo) {
@@ -210,6 +229,7 @@ function CreateStackFrame(method) {
 	frame.localVariables = [];
 	frame.operandStack = [];
 	frame.pendingException = null;
+	frame.completionHandlers = [];
 	return frame;
 }
 
@@ -249,44 +269,75 @@ function DebugBacktrace(threadContext) {
 	console.log(backtrace);
 }
 
-function RunJavaThreadWithMethod(method) {
+function CreateClassInitFrameIfNeeded(jclass) {
+	if (jclass.state == JCLASS_STATE_INITIALIZED) {
+		return null;
+	}
+	// Single-threaded VM allows us to also skip init entirely if we have already begun it
+	if (jclass.state == JCLASS_STATE_INITIALIZING) {
+		return null;
+	}
+	
+	let clinitMethod = ClassInitializationMethod(jclass);
+	if (!clinitMethod) {
+		jclass.state = JCLASS_STATE_INITIALIZED;
+		return null;
+	}
+	return CreateStackFrame(clinitMethod);
+}
+
+function CreateObjInitFrameIfNeeded(jobj) {
+	if (jobj.state == JOBJ_STATE_INITIALIZED) {
+		return null;
+	}
+	if (jobj.state == JOBJ_STATE_INITIALIZING) {
+		return null;
+	}
+	let initIdentifier = "<init>#()V";
+	let initMethod = jobj.jclass.vtable[initIdentifier];
+	if (!initMethod) {
+		jobj.state = JOBJ_STATE_INITIALIZED;
+		return null;
+	}
+	return CreateStackFrame(initMethod);
+}
+
+function PopVmStackFrame(threadContext, isNormal) {
+	let outgoingFrame = threadContext.stack.shift();
+	if (isNormal) {
+		for (let i = 0; i < outgoingFrame.completionHandlers.length; i++) {
+			outgoingFrame.completionHandlers[i](outgoingFrame);
+		}
+	}
+	return outgoingFrame;
+}
+
+function RunJavaThreadWithMethod(startupMethod) {
 	var threadContext = {};
 	threadContext.stack = [];
 	
 	// Create the bottom frame. We won't execute this immediately, but it will be set up to be returned to.
-	let baseFrame = CreateStackFrame(method);
+	let baseFrame = CreateStackFrame(startupMethod);
 	threadContext.stack.unshift(baseFrame);
-	
-	// At the start of the thread, no classes have been initialized yet, trigger call to the <clinit> call for the current class, if such
-	// an initializer exists.
-	let methodReference = ResolveMethodReference({ "className": method.jclass.className, "methodName": "<clinit>", "descriptor": "()V" }, method.jclass);
-	if (methodReference) {
-		let clinitFrame = CreateStackFrame(methodReference);	
-		threadContext.stack.unshift(clinitFrame);
-	}
-	
+		
 	while (threadContext.stack.length > 0) {
 		let executeNewFrame = false;
+	
+		// Did we blow the stack?
+		// if (threadContext.stack.length > 10) {
+		// 	let soeClass = ResolveClass("java/lang/StackOverflowError");
+		// 	let soe = soeClass.createInstance();
+		//
+		// 	threadContext.stack[0].pendingExeption = soe;
+		// }
+		
 		
 		// Get reference to the top frame which we're currently running, and start executing.
 		// We get here for the very start of every method, and also upon return from callers.
 		let frame = threadContext.stack[0];
 		let code = frame.method.code;
-		let pc = frame.pc;
-		
-		// If this frame represents a method internal to the JVM, then execute it directly here. 
-		// Locals are the args, and if the return type is not void, the result is pushed onto the callers
-		// operand stack, as if it were a real method. 
-		if (code == null && frame.method.impl) {
-			let hasresult = (!frame.method.jmethod.returnType.isVoid());
-			let result = frame.method.impl.apply(null, frame.localVariables);
-			threadContext.stack.shift();
-			if (hasresult) {
-				threadContext.stack[0].operandStack.push(result);
-			}
-			continue;
-		}
-		
+		let pc = frame.pc;	
+	
 		// If there's a pending exception in this frame, look for a handler for it at our current
 		// pc and either go there first, or continue down the stack. 
 		if (frame.pendingException) {
@@ -298,13 +349,50 @@ function RunJavaThreadWithMethod(method) {
 				// We can handle this one. Blow away the stack and jump to the handler.
 				pc = handlerPC;
 				frame.operandStack = [exception];
-			} else {
+			} else if (threadContext.stack.length > 1) {
 				// Nope. Kaboom.
-				threadContext.stack.shift();
+				PopVmStackFrame(threadContext, false);
 				threadContext.stack[0].pendingException = exception;
 				continue;
+			} else {
+				// Nowhere left to throw... 
+				console.log("JVM: Java thread terminated due to unhandled exception " + exception.className);
+				return; 
 			}
 		} 	
+		
+		// If we are starting to execute a method contained in a class which is not yet initialized, then 
+		// stop and initialize the class if appropriate.
+		let clinitFrame = CreateClassInitFrameIfNeeded(frame.method.jclass);
+		if (clinitFrame) { 
+			frame.method.jclass.state = JCLASS_STATE_INITIALIZING;
+			threadContext.stack.unshift(clinitFrame);
+			continue;
+		} 
+		
+		// This is a native method. We need to implement these somehow, but until then, log it and return a 
+		// default value.
+		if ((frame.method.access & ACC_NATIVE) != 0) {
+			console.log("JVM: Eliding native method " + frame.method.jclass.className + "." + frame.method.name + " (desc: " + frame.method.jmethod.desc + ")");
+			let nativeFrame = PopVmStackFrame(threadContext, true);
+			if (!nativeFrame.method.jmethod.returnType.isVoid()) {
+				threadContext.stack[0].operandStack.push(0);
+			}
+			continue;
+		}
+		
+		// If this frame represents a method internal to the JVM, then execute it directly here. 
+		// Locals are the args, and if the return type is not void, the result is pushed onto the callers
+		// operand stack, as if it were a real method. 
+		if (code == null && frame.method.impl) {
+			let hasresult = (!frame.method.jmethod.returnType.isVoid());
+			let result = frame.method.impl.apply(null, frame.localVariables);
+			PopVmStackFrame(threadContext, true);
+			if (hasresult) {
+				threadContext.stack[0].operandStack.push(result);
+			}
+			continue;
+		}
 		
 		// If we're entering a method, say what it is
 		if (pc == 0) {
@@ -320,6 +408,12 @@ function RunJavaThreadWithMethod(method) {
 			let nextPc;
 	
 			switch (opcode) {
+			case 0x01: // aconst_null
+				{
+					frame.operandStack.push(null);
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x02: // iconst_m1
 			case 0x03: // iconst_0
 			case 0x04: // iconst_1
@@ -341,12 +435,46 @@ function RunJavaThreadWithMethod(method) {
 					break;
 				}
 			case 0x12: // ldc
+			case 0x13: // ldc_w
 				{
-					let index = code[pc+1];
+					let index;
+					if (opcode == 0x12) {
+						index = code[pc+1];
+					} else {
+						let indexbyte1 = code[pc+1];
+						let indexbyte2 = code[pc+2];
+						index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					}
 					let constref = frame.method.jclass.loadedClass.constantPool[index];
-					let str = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.string_index);
-					frame.operandStack.push(str);
-					nextPc = pc + 2;
+					let val;
+					switch (constref.tag) {
+					case CONSTANT_Class:
+						let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.name_index);
+						let jclass = ResolveClass(className);
+						let jobj = JavaLangClassObjForClass(jclass);
+						let initFrame;
+						if (jobj.state != JOBJ_STATE_INITIALIZED && (initFrame = CreateObjInitFrameIfNeeded(jobj))) {
+							jobj.state = JOBJ_STATE_INITIALIZING;
+							initFrame.completionHandlers.push(function() { 
+								jobj.state = JOBJ_STATE_INITIALIZED;
+							});
+							frame.pc = pc;
+							threadContext.stack.unshift(initFrame);
+							executeNewFrame = true;						
+						} else {
+							val = jobj;
+						}
+						break;
+					case CONSTANT_String:
+						val = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.string_index);
+						break;
+					default:
+						alert("ldc needs a new case for constant " + constref.tag);
+					}
+					if (val != undefined) {
+						frame.operandStack.push(val);
+						nextPc = pc + 2;
+					}
 					break;
 				}
 			case 0x1A: // iload_0
@@ -456,6 +584,45 @@ function RunJavaThreadWithMethod(method) {
 					nextPc = pc + 3;
 					break;
 				}
+			case 0x99: // ifeq
+			case 0x9A: // ifne
+			case 0x9B: // iflt
+			case 0x9C: // ifge
+			case 0x9D: // ifgt
+			case 0x9E: // ifle
+				{
+					let val = frame.operandStack.pop();
+					let doBranch = false;
+					switch (opcode) {
+					case 0x99: 
+						doBranch = (val == 0);
+						break;
+					case 0x9A:
+						doBranch = (val != 0);
+						break;
+					case 0x9B:
+						doBranch = (val < 0);
+						break;
+					case 0x9C:
+						doBranch = (val >= 0);
+						break;
+					case 0x9D:
+						doBranch = (val > 0);
+						break;
+					case 0x9E:
+						doBranch = (val <= 0);
+						break;
+					}
+					if (doBranch) {
+						let branchbyte1 = code[pc+1];
+						let branchbyte2 = code[pc+2];
+						let offset = Signed16bitValFromTwoBytes(branchbyte1, branchbyte2);
+						nextPc = pc + offset; // probably want to bounds check this guy lol
+					} else {
+						nextPc = pc + 3;
+					}
+					break;
+				}
 			case 0xA0: // if_icmpne
 				{
 					let value2 = frame.operandStack.pop();
@@ -482,7 +649,7 @@ function RunJavaThreadWithMethod(method) {
 				{
 					let ival = frame.operandStack.pop();
 					// blow away all the other frame state.
-					threadContext.stack.shift();
+					PopVmStackFrame(threadContext, true);
 					// push the return value onto the caller's stack
 					threadContext.stack[0].operandStack.push(ival);
 					executeNewFrame = true;
@@ -491,14 +658,14 @@ function RunJavaThreadWithMethod(method) {
 			case 0xB0: // areturn
 				{
 					let aval = frame.operandStack.pop();
-					threadContext.stack.shift();
+					PopVmStackFrame(threadContext, true);
 					threadContext.stack[0].operandStack.push(aval);
 					executeNewFrame = true;
 					break;					
 				}
 			case 0xB1: // return 
 				{
-					threadContext.stack.shift();
+					PopVmStackFrame(threadContext, true);
 					executeNewFrame = true;
 					break;
 				}
@@ -510,10 +677,18 @@ function RunJavaThreadWithMethod(method) {
 					// Resolve a static field for this index. 
 					let fieldInfo = frame.method.jclass.loadedClass.fieldInfoFromIndex(index);
 					let fieldRef = ResolveFieldReference(fieldInfo);  // returns {jclass, field reference}
-					// Get the value of the static field XXXX
-					let fieldValue = fieldRef.jclass.fieldVals[fieldInfo.fieldName];
-					frame.operandStack.push(fieldValue);
-					nextPc = pc + 3;
+					// Is the class in which the field lives intialized yet? 
+					if (fieldRef.jclass.state != JCLASS_STATE_INITIALIZED && (clinitFrame = CreateClassInitFrameIfNeeded(fieldRef.jclass))) {
+						fieldRef.jclass.state = JCLASS_STATE_INITIALIZING;
+						threadContext.stack.unshift(clinitFrame);
+						executeNewFrame = true;
+						frame.pc = pc;
+					} else {
+						// Get the value of the static field XXXX
+						let fieldValue = fieldRef.jclass.fieldVals[fieldInfo.fieldName];
+						frame.operandStack.push(fieldValue);
+						nextPc = pc + 3;
+					}
 					break;
 				}
 			case 0xB3: // putstatic
@@ -627,7 +802,7 @@ function RunJavaThreadWithMethod(method) {
 					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
 					// Resolve a static method for this index. 
 					let methodInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(index);
-					let methodRef = ResolveMethodReference(methodInfo, frame.method.jclass);  // wrong class! XXX
+					let methodRef = ResolveMethodReference(methodInfo, null);  // what's the right class param here
 
 					let childFrame = CreateStackFrame(methodRef);		
 					childFrame.localVariables = frame.operandStack.slice();
@@ -638,6 +813,20 @@ function RunJavaThreadWithMethod(method) {
 					threadContext.stack.unshift(childFrame);
 					// Break out of this execution loop.
 					executeNewFrame = true;
+					break;
+				}
+			case 0xBD: // newarray
+				{
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let constref = frame.method.jclass.loadedClass.constantPool[index];
+					let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.name_index);
+					let arrayClass = ResolveClass(className);
+					let count = frame.operandStack.pop();
+					let newarray = new JArray(arrayClass, count);
+					frame.operandStack.push(newarray);
+					nextPc = pc + 3;
 					break;
 				}
 			case 0xBF: // athrow
@@ -653,7 +842,7 @@ function RunJavaThreadWithMethod(method) {
 					} else {
 						// This frame can't handle this exception, so blow it up, and stick
 						// the exception object in the next frame down the stack and make *it* figure it out.
-						threadContext.stack.shift();
+						PopVmStackFrame(threadContext, false);
 						threadContext.stack[0].pendingException = throwable;
 						executeNewFrame = true;
 					}
@@ -693,9 +882,16 @@ function RunJavaThreadWithMethod(method) {
 					let classRef = frame.method.jclass.loadedClass.constantPool[index];
 					let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(classRef.name_index);
 					let jclass = ResolveClass(className);
-					let jObj = jclass.createInstance();
-					frame.operandStack.push(jObj);
-					nextPc = pc + 3;
+					let clinitFrame;
+					if (jclass.state != JCLASS_STATE_INITIALIZED && (clinitFrame = CreateClassInitFrameIfNeeded(jclass))) {
+						threadContext.stack.unshift(clinitFrame);
+						executeNewFrame = true;
+						frame.pc = pc;
+					} else {
+						let jObj = jclass.createInstance();
+						frame.operandStack.push(jObj);
+						nextPc = pc + 3;
+					}
 					break;
 				}
 			case 0xC6: // ifnull
@@ -813,19 +1009,19 @@ function InjectOutputMockObjects() {
 	// Stuff that lets us print stuff to the console. 
 	var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/lang/Object", [], [], [], []);
 	var javaIoPrintStreamJclass = new JClass(javaIoPrintStreamLoadedClass);
-	javaIoPrintStreamJclass.vtable["println#(Ljava/lang/String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl": 
-		function(jobj, x) { 
+	javaIoPrintStreamJclass.vtable["println#(Ljava/lang/String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
+		function(jobj, x) {
 			console.log(x);
 		}
 	};
-	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl": 
-		function(jobj, x) { 
+	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
+		function(jobj, x) {
 			console.log(x);
 		}
 	};
 	AddClass(javaIoPrintStreamJclass);
 	var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
-	
+
 	var javaLangSystemLoadedClass = new JLoadedClass("java/lang/System", "java/lang/Object", [], [], [], []);
 	var javaLangSystemJclass = new JClass(javaLangSystemLoadedClass);
 	javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava/io/PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
@@ -837,7 +1033,7 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	
 	// Inject system crap so we don't need JDK for super simple tests
 	InjectOutputMockObjects();
-
+	
 	// Load the main class
 	let classLoader = new KLClassLoader();
 	let clresult = classLoader.loadFromHexString(mainClassHex);
