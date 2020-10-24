@@ -15,8 +15,14 @@ function JObj(jclass) {
  	} while (curclass);
 }
 
-function JArray(jclass, count) {
-	this.jclass = jclass;
+function JArray(jclassOrType, count) {
+	this.jclass = null;
+	this.atype = 0;
+	if (Number.isInteger(jclassOrType)) {
+		this.atype = jclassOrType;
+	} else {
+		this.jclass = jclassOrType;
+	}
 	this.count = count;
 	this.elements = [];
 	for (let i = 0; i < count; i++) {

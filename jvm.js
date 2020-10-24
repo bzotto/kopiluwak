@@ -370,14 +370,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 			continue;
 		} 
 		
-		// This is a native method. We need to implement these somehow, but until then, log it and return a 
-		// default value.
-		if ((frame.method.access & ACC_NATIVE) != 0) {
+		// Check if this is a native method we don't support. If so, log it and return a default value.
+		if ((frame.method.access & ACC_NATIVE) != 0 && !frame.method.impl) {
 			console.log("JVM: Eliding native method " + frame.method.jclass.className + "." + frame.method.name + " (desc: " + frame.method.jmethod.desc + ")");
 			let nativeFrame = PopVmStackFrame(threadContext, true);
-			if (!nativeFrame.method.jmethod.returnType.isVoid()) {
+			let returnType = nativeFrame.method.jmethod.returnType;
+			if (returnType.isObject() || returnType.isArray()) {
+				threadContext.stack[0].operandStack.push(null);
+			} else if (!returnType.isVoid()) {
 				threadContext.stack[0].operandStack.push(0);
-			}
+			} 
 			continue;
 		}
 		
@@ -407,6 +409,8 @@ function RunJavaThreadWithMethod(startupMethod) {
 			let opcode = code[pc];
 			let nextPc;
 	
+			console.log("opcode " + opcode);
+	
 			switch (opcode) {
 			case 0x01: // aconst_null
 				{
@@ -427,6 +431,15 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x0B: // fconst_0
+			case 0x0C: // fconst_1
+			case 0x0D: // fconst_2
+				{
+					let fval = (opcode - 0x0B) * 1.0;
+					frame.operandStack.push(fval);
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x10: // bipush
 				{
 					let byte = code[pc+1];
@@ -434,9 +447,19 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 2;
 					break;
 				}
+			case 0x11: // sipush
+				{
+					let byte1 = code[pc+1];
+					let byte2 = code[pc+2];
+					let val = ((byte1 << 8) | byte2) >>> 0;
+					frame.operandStack.push(val);
+					nextPc = pc + 3;
+					break;
+				}
 			case 0x12: // ldc
 			case 0x13: // ldc_w
 				{
+					let instlen = ((opcode == 0x12) ? 2 : 3);
 					let index;
 					if (opcode == 0x12) {
 						index = code[pc+1];
@@ -486,7 +509,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					}
 					if (val != undefined) {
 						frame.operandStack.push(val);
-						nextPc = pc + 2;
+						nextPc = pc + instlen;
 					}
 					break;
 				}
@@ -500,6 +523,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x22: // fload_0
+			case 0x23: // fload_1
+			case 0x24: // fload_2
+			case 0x25: // fload_3
+				{
+					let pos = opcode - 0x22;
+					frame.operandStack.push(frame.localVariables[pos]);
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x2A: // aload_0
 			case 0x2B: // aload_1
 			case 0x2C: // aload_2
@@ -508,6 +541,21 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let pos = opcode - 0x2A;
 					frame.operandStack.push(frame.localVariables[pos]);
 					nextPc = pc + 1;
+					break;
+				}
+			case 0x2E: // iaload
+			case 0x2F: // laload
+			case 0x30: // faload
+			case 0x31: // daload
+			case 0x32: // aaload
+			case 0x33: // baload
+			case 0x34: // caload
+			case 0x35: // saload
+				{
+					let index = frame.operandStack.pop();
+					let arrayref = frame.operandStack.pop();
+					let value = arrayref.elements[index];
+					frame.operandStack.push(value);
 					break;
 				}
 			case 0x3B: // istore_0
@@ -532,6 +580,47 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x4F: // iastore
+			case 0x50: // lastore
+			case 0x51: // fastore
+			case 0x52: // dastore
+			case 0x54: // bastore
+			case 0x55: // castore
+			case 0x56: // sastore
+				{
+					let value = frame.operandStack.pop();
+					let index = frame.operandStack.pop();
+					let arrayref = frame.operandStack.pop();
+					if (opcode == 0x54) {
+						if (arrayref.atype != T_BOOLEAN && arrayref.atype != T_BYTE) {
+							console.log("JVM: bastore on bad array");
+							return;
+						}
+					} else {
+						let typeMap = { 0x4F: T_INT, 0x50: T_LONG, 0x51: T_FLOAT, 0x52: T_DOUBLE, 0x55: T_CHAR, 0x56: T_SHORT };
+						let atype = typeMap[opcode];
+						if (arrayref.atype != typeMap[opcode]) {
+							console.log("JVM: store of type " + typeMap[opcode] + " on bad array");
+							return;
+						}
+					}
+					arrayref.elements[index] = value;
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x53: // aastore
+				{
+					let value = frame.operandStack.pop();
+					let index = frame.operandStack.pop();
+					let arrayref = frame.operandStack.pop();
+					if (arrayref.jclass != value.jclass) {
+						console.log("JVM: aastore of " + value.jclass + " to array of " + arrayref.jclass.className);
+						return;
+					}
+					arrayref.elements[index] = value;
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x57: // pop
 				{
 					frame.operandStack.pop();
@@ -552,6 +641,15 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let add1 = frame.operandStack.pop();
 					let res = add1 + add2;
 					frame.operandStack.push(res);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x64: // isub
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let result = value1 - value2;
+					frame.operandStack.push(result);
 					nextPc = pc + 1;
 					break;
 				}
@@ -583,6 +681,27 @@ function RunJavaThreadWithMethod(startupMethod) {
 					val += c;
 					frame.localVariables[index] = val;
 					nextPc = pc + 3;
+					break;
+				}
+			case 0x95: // fcmpl
+			case 0x96: // fcmpg
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					if (value1 == NaN || value2 == NaN) {
+						if (opcode == 0x95) {
+							frame.operandStack.push(-1);
+						} else {
+							frame.operandStack.push(1);
+						}
+					} else if (value1 > value2) {
+						frame.operandStack.push(1);
+					} else if (value1 == value2) {
+						frame.operandStack.push(0);
+					} else if (value1 < value2) {
+						frame.operandStack.push(-1);
+					}
+					nextPc = pc + 1;
 					break;
 				}
 			case 0x99: // ifeq
@@ -624,11 +743,37 @@ function RunJavaThreadWithMethod(startupMethod) {
 					}
 					break;
 				}
+			case 0x9F: // if_icmpeq
 			case 0xA0: // if_icmpne
+			case 0xA1: // if_icmplt
+			case 0xA2: // if_icmpge
+			case 0xA3: // if_icmpgt
+			case 0xA4: // if_icmple
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					if (value1 != value2) {
+					let doBranch = false;
+					switch (opcode) {
+					case 0x9F:
+						doBranch = (value1 == value2);
+						break;
+					case 0xA0:
+						doBranch = (value1 != value2);
+						break;
+					case 0xA1:
+						doBranch = (value1 < value2);
+						break;
+					case 0xA2:
+						doBranch = (value1 >= value2);
+						break;
+					case 0xA3:
+						doBranch = (value1 > value2);
+						break;
+					case 0xA4:
+						doBranch = (value1 <= value2);
+						break;
+					}
+					if (doBranch) {
 						let branchbyte1 = code[pc+1];
 						let branchbyte2 = code[pc+2];
 						let offset = Signed16bitValFromTwoBytes(branchbyte1, branchbyte2);
@@ -748,8 +893,11 @@ function RunJavaThreadWithMethod(startupMethod) {
 					// Build descriptor so we know how to find the target object.
 					let jmethod = new JMethod(methodInfo.descriptor);
 					let nargs = jmethod.parameterTypes.length;
-					let args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
-					let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
+					let args = frame.operandStack.splice(nargs * -1.0, nargs);
+					let jobj = frame.operandStack.pop();
+					
+					// let args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
+					// let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
 					args.unshift(jobj);
 					if (!jobj) {
 						console.log("Invoke virtual on a null jobj won't work...");
@@ -785,8 +933,8 @@ function RunJavaThreadWithMethod(startupMethod) {
 					// Build descriptor so we know how to find the target object.
 					let jmethod = new JMethod(methodInfo.descriptor);
 					let nargs = jmethod.parameterTypes.length;
-					let args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
-					let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
+					let args = frame.operandStack.splice(nargs * -1.0, nargs);
+					let jobj = frame.operandStack.pop();
 					args.unshift(jobj);
 					// Resolve the method, using the target object's class.
 					
@@ -828,7 +976,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 					executeNewFrame = true;
 					break;
 				}
-			case 0xBD: // newarray
+			case 0xBC: // newarray
+				{
+					let atype = code[pc+1];
+					let count = frame.operandStack.pop();
+					let newarray = new JArray(atype, count);
+					frame.operandStack.push(newarray);
+					nextPc = pc + 2;
+					break;
+				}
+			case 0xBD: // anewarray
 				{
 					let indexbyte1 = code[pc+1];
 					let indexbyte2 = code[pc+2];
@@ -978,6 +1135,15 @@ function JClassFromLoadedClass(loadedClass) {
 		
 		let methodIdentifier = name + "#" + desc;
 		
+		// If there's no code, maybe we have a native impl.
+		let impl = null;
+		if (!codeAttr && ((access_flags & ACC_NATIVE) != 0)) {
+			let classImpls = KLNativeImpls[jclass.className];
+			if (classImpls) {
+				impl = classImpls[methodIdentifier];
+			}
+		}
+		
 		// Find a line number table if one exists.
 		let lineNumberTable = null;
 		if (codeAttr && codeAttr.attributes) {
@@ -997,7 +1163,7 @@ function JClassFromLoadedClass(loadedClass) {
 			"jclass": jclass,
 			"jmethod": new JMethod(desc), 
 			"access": access_flags, 
-			"impl": null, 
+			"impl": impl, 
 			"code": codeAttr ? codeAttr.code : null,
 			"exceptions": codeAttr ? codeAttr.exception_table : null,
 			"lineNumbers": lineNumberTable 

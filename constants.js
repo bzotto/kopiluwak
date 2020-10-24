@@ -53,3 +53,17 @@ const REF_invokeStatic = 6;
 const REF_invokeSpecial	= 7;
 const REF_newInvokeSpecial = 8;
 const REF_invokeInterface = 9;
+
+//
+// Array types
+//
+
+const T_BOOLEAN	= 4;
+const T_CHAR = 5;
+const T_FLOAT = 6;
+const T_DOUBLE = 7;
+const T_BYTE = 8;
+const T_SHORT = 9;
+const T_INT	= 10;
+const T_LONG = 11;
+
