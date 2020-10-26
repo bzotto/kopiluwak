@@ -18,6 +18,6 @@ KLNativeImpls["jdk/internal/util/SystemProps$Raw"] = {
 	},
 	"platformProperties#()[Ljava/lang/String;": function() { 
 		let strClass = ResolveClass("java/lang/String");
-		return new JArray(strClass, 1);
+		return new JArray(strClass, 2);
 	}
 }

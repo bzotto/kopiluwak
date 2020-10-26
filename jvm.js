@@ -10,6 +10,9 @@
 let LoadedClasses = [];
 let ClassesToJavaLangClass = {};
 
+// Debugger infrastructure
+let JavaBreakpoints = [];  // { filename: lineNumber}
+
 function AddClass(jclass) {
 	if (jclass.superclassName) {
 		// Find the superclass to ensure that the chain above is already loaded.
@@ -309,7 +312,53 @@ function PopVmStackFrame(threadContext, isNormal) {
 			outgoingFrame.completionHandlers[i](outgoingFrame);
 		}
 	}
+	console.log("--> Exiting " + outgoingFrame.method.jclass.className + "." + outgoingFrame.method.name);
 	return outgoingFrame;
+}
+
+function bp(filename, ln) {
+	JavaBreakpoints.push({"fileName": filename, "lineNumber": ln});
+}
+
+function DebugBreakIfNecessary(threadContext) {
+	if (JavaBreakpoints.length == 0) {
+		return;
+	}
+	
+	let frame = threadContext.stack[0];
+	
+	// Is there a source file name?
+	let sourceFileName = frame.method.jclass.loadedClass.sourceFileName();
+	if (!sourceFileName) {
+		return;
+	}
+		
+	// Is there a line number table?
+	let lineNumbers = frame.method.lineNumbers;
+	if (!lineNumbers) {
+		return;
+	}
+	let lineNumber = -1;
+	for (let j = 0; j < lineNumbers.length; j++) {
+		let lineEntry = lineNumbers[j];
+		if (lineEntry.start_pc > frame.pc) {
+			break;
+		}
+		lineNumber = lineEntry.line_number;
+	}
+	
+	// See if there's a matching breakpoint.
+	let hit = null;
+	for (let i = 0; i < JavaBreakpoints.length; i++) {
+		let bp = JavaBreakpoints[i];
+		if (bp.fileName == sourceFileName && bp.lineNumber == lineNumber) {
+			hit = bp;
+		}
+	}
+	
+	if (hit) {
+		debugger;
+	}
 }
 
 function RunJavaThreadWithMethod(startupMethod) {
@@ -387,6 +436,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 		// Locals are the args, and if the return type is not void, the result is pushed onto the callers
 		// operand stack, as if it were a real method. 
 		if (code == null && frame.method.impl) {
+			console.log("--> Entering " + frame.method.jclass.className + "." + frame.method.name);
 			let hasresult = (!frame.method.jmethod.returnType.isVoid());
 			let result = frame.method.impl.apply(null, frame.localVariables);
 			PopVmStackFrame(threadContext, true);
@@ -398,7 +448,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 		
 		// If we're entering a method, say what it is
 		if (pc == 0) {
-			// console.log("--> Entering " + frame.method.jclass.className + "." + frame.method.name);
+			console.log("--> Entering " + frame.method.jclass.className + "." + frame.method.name);
 		}	
 				
 		// Enter the primary execution loop		
@@ -406,11 +456,11 @@ function RunJavaThreadWithMethod(startupMethod) {
 			// update this before executing so it's present in case we need to dump the user stack
 			frame.pc = pc;       
 			
+			DebugBreakIfNecessary(threadContext);
+			
 			let opcode = code[pc];
 			let nextPc;
-	
-			console.log("opcode " + opcode);
-	
+		
 			switch (opcode) {
 			case 0x01: // aconst_null
 				{
@@ -513,6 +563,17 @@ function RunJavaThreadWithMethod(startupMethod) {
 					}
 					break;
 				}
+			case 0x15: // iload
+			case 0x16: // lload
+			case 0x17: // fload
+			case 0x18: // dload
+			case 0x19: // aload
+				{
+					let index = code[pc+1];
+					frame.operandStack.push(frame.localVariables[index]);
+					nextPc = pc + 2;
+					break;
+				}
 			case 0x1A: // iload_0
 			case 0x1B: // iload_1
 			case 0x1C: // iload_2
@@ -554,8 +615,25 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let index = frame.operandStack.pop();
 					let arrayref = frame.operandStack.pop();
-					let value = arrayref.elements[index];
+					if (!arrayref) {
+						DebugBacktrace(threadContext);
+						return;
+					}
+ 					let value = arrayref.elements[index];
 					frame.operandStack.push(value);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x36: // istore
+			case 0x37: // lstore
+			case 0x38: // fstore
+			case 0x39: // dstore
+			case 0x3A: // astore
+				{
+					let index = code[pc+1];
+					let aval = frame.operandStack.pop();
+					frame.localVariables[index] = aval;
+					nextPc = pc + 2;
 					break;
 				}
 			case 0x3B: // istore_0
@@ -653,6 +731,15 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x6A: // fmul
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let result = value1 * value2;
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x6C: // idiv
 				{
 					let value2 = frame.operandStack.pop();
@@ -673,6 +760,41 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x7C: // iushr
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let s = value2 & 0x1F;
+					let result;
+					if (value1 > 0) {
+						result = value1 >> s;
+					} else {
+						result = (value1 >> s) + (2 << ~s);
+					}
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x7E: // iand
+			case 0x7F: // land
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let result = value1 & value2;
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x82: // ixor
+			case 0x83: // lxor
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let result = value1 ^ value2;
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x84: // iinc
 				{
 					let index = code[pc+1];
@@ -681,7 +803,29 @@ function RunJavaThreadWithMethod(startupMethod) {
 					val += c;
 					frame.localVariables[index] = val;
 					nextPc = pc + 3;
-					break;
+					break;	
+				}
+			case 0x85: // i2l
+			case 0x86: // i2f
+			case 0x87: // i2d
+				{
+					// NOTHING. Sneaky.
+					nextPc = pc + 1;
+					break;						
+				}
+			case 0x8B: // f2i
+			case 0x8E: // d2i
+				{
+					let val = frame.operandStack.pop();
+					let result;
+					if (isNaN(val)) {
+						result = 0;
+					} else {
+						result = Math.trunc(val);
+					}
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;						
 				}
 			case 0x95: // fcmpl
 			case 0x96: // fcmpg
@@ -900,7 +1044,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					// let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
 					args.unshift(jobj);
 					if (!jobj) {
-						console.log("Invoke virtual on a null jobj won't work...");
+						DebugBacktrace(threadContext);
 						return;
 					}
 					// Resolve the method, using the target object's class.
@@ -964,9 +1108,11 @@ function RunJavaThreadWithMethod(startupMethod) {
 					// Resolve a static method for this index. 
 					let methodInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(index);
 					let methodRef = ResolveMethodReference(methodInfo, null);  // what's the right class param here
+					let nargs = methodRef.jmethod.parameterTypes.length;
+					let args = frame.operandStack.splice(nargs * -1.0, nargs);
 
 					let childFrame = CreateStackFrame(methodRef);		
-					childFrame.localVariables = frame.operandStack.slice();
+					childFrame.localVariables = args;
 					
 					// Save the current next-PC state.
 					frame.pc = pc + 3;
@@ -1098,6 +1244,9 @@ function RunJavaThreadWithMethod(startupMethod) {
 			if (executeNewFrame) {
 				executeNewFrame = false;
 				break;
+			} 
+			if (nextPc == pc) {
+				console.log("Last opcode " + opcode + " didn't update PC");
 			}
 			pc = nextPc;
 		}
