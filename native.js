@@ -8,6 +8,12 @@
 
 var KLNativeImpls = {};
 
+KLNativeImpls["java/lang/Object"] = {
+	"hashCode#()I": function() {
+		return 1;
+	}
+};
+
 KLNativeImpls["jdk/internal/util/SystemProps$Raw"] = {
 	"vmProperties#()[Ljava/lang/String;": function() { 
 		let strClass = ResolveClass("java/lang/String");
@@ -20,4 +26,4 @@ KLNativeImpls["jdk/internal/util/SystemProps$Raw"] = {
 		let strClass = ResolveClass("java/lang/String");
 		return new JArray(strClass, 2);
 	}
-}
+};

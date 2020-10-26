@@ -691,7 +691,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let value = frame.operandStack.pop();
 					let index = frame.operandStack.pop();
 					let arrayref = frame.operandStack.pop();
-					if (arrayref.jclass != value.jclass) {
+					if (value != null && arrayref.jclass != value.jclass) {
 						console.log("JVM: aastore of " + value.jclass + " to array of " + arrayref.jclass.className);
 						return;
 					}
@@ -710,6 +710,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let val = frame.operandStack.pop();
 					frame.operandStack.push(val);
 					frame.operandStack.push(val);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x5A: // dup_x1
+				{
+					let value1 = frame.operandStack.pop();
+					let value2 = frame.operandStack.pop();
+					frame.operandStack.push(value1);
+					frame.operandStack.push(value2);
+					frame.operandStack.push(value1);
 					nextPc = pc + 1;
 					break;
 				}
@@ -756,6 +766,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let value1 = frame.operandStack.pop();
 					// this would be a good place to check for zero divisor and throw a runtime exception
 					let result = value1 - (Math.trunc(value1 / value2)) * value2;
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x78: // ishl
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let s = value2 & 0x1F;
+					let result = value1 << s;
 					frame.operandStack.push(result);
 					nextPc = pc + 1;
 					break;
@@ -922,6 +942,22 @@ function RunJavaThreadWithMethod(startupMethod) {
 						let branchbyte2 = code[pc+2];
 						let offset = Signed16bitValFromTwoBytes(branchbyte1, branchbyte2);
 						nextPc = pc + offset; // probably want to bounds check this guy lol
+					} else {
+						nextPc = pc + 3;
+					}
+					break;
+				}
+			case 0xA5: // if_acmpeq
+			case 0xA6: // if_acmpne
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					if ((opcode == 0xA5 && value1 == value2) ||
+						(opcode == 0xA6 && value1 != value2)) {
+						let branchbyte1 = code[pc+1];
+						let branchbyte2 = code[pc+2];
+						let offset = Signed16bitValFromTwoBytes(branchbyte1, branchbyte2);
+						nextPc = pc + offset; // hm
 					} else {
 						nextPc = pc + 3;
 					}
@@ -1208,6 +1244,37 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let arrayref = frame.operandStack.pop();
 					frame.operandStack.push(arrayref.count);
 					nextPc = pc + 1;
+					break;
+				}
+			case 0xC0: // checkcast
+				{
+					// XXX need to do a lot here!
+					let obj = frame.operandStack.pop();
+					if (obj == null) {
+						frame.operandStack.push(null);
+					} else {
+						let indexbyte1 = code[pc+1];
+						let indexbyte2 = code[pc+2];
+						let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+						let classOrArrayOrInterfaceRef = frame.method.jclass.loadedClass.constantPool[index];
+						let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(classOrArrayOrInterfaceRef.name_index);
+						let castOK = false;
+						if (className == "java/lang/String") {
+							if (typeof obj == 'string') {
+								castOK = true;
+							}
+						} else if (typeof obj == 'object' && obj.jclass.className == className ||
+							IsClassASubclassOf(obj.jarray.className, className)) {
+								castOK = true;
+						}
+						if (castOK) {
+							// put it back
+							frame.operandStack.push(obj);
+						} else {
+							alert("ClassCastException! Can't cast " + obj + " to " + className);
+						}
+					}
+					nextPc = pc + 3;
 					break;
 				}
 			case 0xC6: // ifnull
