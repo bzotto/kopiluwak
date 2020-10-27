@@ -7,6 +7,8 @@ function JObj(jclass) {
 	this.state = JOBJ_STATE_UNINITIALIZED;
 	this.fieldValsByClass = {};			// keyed by classname:{name:value}
 	
+	this.meta = {}; // storage for VM metadata. Useful for e.g. Java Class objects to tie back to what they reflect.
+	
 	// Set up the field val class buckets.
 	let curclass = jclass;
 	do {
@@ -18,6 +20,7 @@ function JObj(jclass) {
 function JArray(jclassOrType, count) {
 	this.jclass = null;
 	this.atype = 0;
+	this.monitor = 0;
 	if (Number.isInteger(jclassOrType)) {
 		this.atype = jclassOrType;
 	} else {
@@ -41,6 +44,7 @@ function JClass(loadedClass) {
 	this.superclassName = loadedClass.superclassName;
 	
 	this.state = JCLASS_STATE_UNINITIALIZED;
+	this.monitor = 0;
 	
 	this.fields = {};			// keyed by name, { jtype: JType, access: access }
 	this.vtable = {};			// keyed by identifer, { jmethod: JMethod, access: access, impl:  function }

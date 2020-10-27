@@ -72,6 +72,16 @@ function ResolveClass(className) {
 		AddClass(jdkClass);
 		return jdkClass;
 	}
+	
+	// Is this some kind of wacko primitive class??
+	if (/^\[?(B|Z|I|D|F|C|J|S|L.+;)$/.test(className)) {
+		// Sigh. Ok. Cook up a class object for this oddball thing. This is going to blow up on me.
+		let primitiveClass = new JClass({"className": className, "superclassName": "java/lang/Object" });
+		AddClass(primitiveClass);
+		return primitiveClass;
+	}
+	
+		
 	console.log("ERROR: Failed to resolve class " + className);
 	return null;
 }
@@ -81,9 +91,13 @@ function JavaLangClassObjForClass(jclass) {
 	if (!jlcClass) {
 		let classClass = ResolveClass("java/lang/Class");
 		if (!classClass) {
+			
 			// throw??
 		}
 		jlcClass = classClass.createInstance();
+		// Set the referenced class name. [!] This is supposed to be set by native method initClassName.
+		jlcClass.fieldValsByClass["java/lang/Class"]["name"] = jclass.className;
+		jlcClass.meta["classClass"] = jclass;
 		ClassesToJavaLangClass[jclass] = jlcClass;
 	}
 	return jlcClass;
@@ -539,7 +553,30 @@ function RunJavaThreadWithMethod(startupMethod) {
 						}
 						break;
 					case CONSTANT_String:
-						val = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.string_index);
+						{
+							let strconst = frame.method.jclass.loadedClass.constantPool[constref.string_index];
+							let strbytes = strconst.bytes;
+							// Create a string object to wrap the literal.
+							let strclass = ResolveClass("java/lang/String");
+							let strobj = strclass.createInstance();
+							let arrobj = new JArray(T_INT, strbytes.length);
+							arrobj.elements = strbytes;
+							// Rig the current frame and the child completion to land on the next instruction with the 
+							// stack looking right.
+							let initMethod = ResolveMethodReference({"className": "java/lang/String", "methodName": "<init>", "descriptor": "([III)V"});
+							let initFrame = CreateStackFrame(initMethod);
+							initFrame.localVariables.push(strobj);
+							initFrame.localVariables.push(arrobj);
+							initFrame.localVariables.push(0);
+							initFrame.localVariables.push(arrobj.count);
+							initFrame.completionHandlers.push(function() { 
+								strobj.state = JOBJ_STATE_INITIALIZED;
+							});
+							frame.operandStack.push(strobj); // by the time the string init returns, this should be set up.
+							frame.pc = pc + instlen;
+							threadContext.stack.unshift(initFrame);
+							executeNewFrame = true;						
+						}						
 						break;
 					case CONSTANT_Integer:
 						val = constref.bytes;
@@ -770,6 +807,14 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 1;
 					break;
 				}
+			case 0x74: // ineg
+				{
+					let value = frame.operandStack.pop();
+					let result = (~value) + 1;
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x78: // ishl
 				{
 					let value2 = frame.operandStack.pop();
@@ -846,6 +891,18 @@ function RunJavaThreadWithMethod(startupMethod) {
 					frame.operandStack.push(result);
 					nextPc = pc + 1;
 					break;						
+				}
+			case 0x91: // i2b
+				{
+					let val = frame.operandStack.pop();
+					val = val & 0x000000FF;
+					if ((val & 0x00000080) > 0) {
+						// sign extend to int size
+						val = val | 0xFFFFFF00;
+					}
+					frame.operandStack.push(val);
+					nextPc = pc + 1;
+					break;
 				}
 			case 0x95: // fcmpl
 			case 0x96: // fcmpg
@@ -1277,6 +1334,20 @@ function RunJavaThreadWithMethod(startupMethod) {
 					nextPc = pc + 3;
 					break;
 				}
+			case 0xC2: // monitorenter
+				{
+					let jobj = frame.operandStack.pop();
+					jobj.monitor = jobj.monitor + 1;
+					nextPc = pc + 1;
+					break;
+				}
+			case 0xC3: // monitorexit
+				{
+					let jobj = frame.operandStack.pop();
+					jobj.monitor = jobj.monitor - 1;
+					nextPc = pc + 1;
+					break;
+				}
 			case 0xC6: // ifnull
 				{
 					let branchbyte1 = code[pc+1];
@@ -1430,10 +1501,10 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	InjectOutputMockObjects();
 	
 	// Create the VM startup thread. 
-	let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
-	if (initPhase1Method) {
-		RunJavaThreadWithMethod(initPhase1Method);
-	}	
+	// let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
+	// if (initPhase1Method) {
+	// 	RunJavaThreadWithMethod(initPhase1Method);
+	// }
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();
