@@ -14,7 +14,7 @@ function JsStringFromJavaStringObject(javaString) {
 		return "";
 	}
 	let bytesJArray = javaString.fieldValsByClass["java/lang/String"]["value"];
-	return String.fromCharCode.apply(null, bytesJArray.elements);
+	return String.fromCharCode.apply(null, bytesJArray.elements.slice());
 }
 
 var KLNativeImpls = {};
@@ -44,8 +44,8 @@ KLNativeImpls["jdk/internal/util/SystemProps$Raw"] = {
 	"vmProperties#()[Ljava/lang/String;": function() { 
 		let strClass = ResolveClass("java/lang/String");
 		let arr = new JArray(strClass, 4);
-		arr.elements[0] = "java.home";
-		arr.elements[1] = "/";
+		arr.elements[0] = JavaLangStringObjForJSString("java.home");
+		arr.elements[1] = JavaLangStringObjForJSString("/");
 		return arr;
 	},
 	"platformProperties#()[Ljava/lang/String;": function() { 

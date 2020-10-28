@@ -96,6 +96,12 @@ function KLClassLoader(classFileHexStringOrBytes) {
 					info["low_bytes"] = readU4();
 					break;
 				}
+			case CONSTANT_Double:
+				{
+					info["high_bytes"] = readU4();
+					info["low_bytes"] = readU4();
+					break;
+				}
 			case CONSTANT_NameAndType:
 				{
 					info["name_index"] = readU2();

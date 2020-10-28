@@ -11,7 +11,7 @@ let LoadedClasses = [];
 let ClassesToJavaLangClass = {};
 
 // Debugger infrastructure
-let JavaBreakpoints = [];  // { filename: lineNumber}
+let JavaBreakpoints = [];  // { fileName: lineNumber} OR { methodName: fqmn }
 
 function AddClass(jclass) {
 	if (jclass.superclassName) {
@@ -86,6 +86,19 @@ function ResolveClass(className) {
 	return null;
 }
 
+function JavaLangStringObjForJSString(jsStr) {
+	let bytes = [];
+    for (let i = 0; i < jsStr.length; i++) {
+        bytes.push(jsStr.charCodeAt(i));
+    }
+	let stringClass = ResolveClass("java/lang/String");
+	stringObj = stringClass.createInstance();
+	stringObj.fieldValsByClass["java/lang/String"]["value"] = bytes;
+	stringObj.fieldValsByClass["java/lang/String"]["coder"] = 0;  // ???
+	stringObj.state = JOBJ_STATE_INITIALIZED;
+	return stringObj;
+}
+
 function JavaLangClassObjForClass(jclass) {
 	let jlcClass = ClassesToJavaLangClass[jclass];
 	if (!jlcClass) {
@@ -96,7 +109,7 @@ function JavaLangClassObjForClass(jclass) {
 		}
 		jlcClass = classClass.createInstance();
 		// Set the referenced class name. [!] This is supposed to be set by native method initClassName.
-		jlcClass.fieldValsByClass["java/lang/Class"]["name"] = jclass.className;
+		jlcClass.fieldValsByClass["java/lang/Class"]["name"] = JavaLangStringObjForJSString(jclass.className);
 		jlcClass.meta["classClass"] = jclass;
 		ClassesToJavaLangClass[jclass] = jlcClass;
 	}
@@ -334,7 +347,31 @@ function bp(filename, ln) {
 	JavaBreakpoints.push({"fileName": filename, "lineNumber": ln});
 }
 
-function DebugBreakIfNecessary(threadContext) {
+function bpfn(methodName) {
+	JavaBreakpoints.push({"methodName": methodName});
+}
+
+function BreakOnMethodStartIfNecessary(threadContext) {
+	if (JavaBreakpoints.length == 0) {
+		return;
+	}
+	let frame = threadContext.stack[0];
+	let fqmn = frame.method.jclass.className.replace(/\//g, ".") + "." + frame.method.name;
+	let hit = null;
+	for (let i = 0; i < JavaBreakpoints.length; i++) {
+		let bp = JavaBreakpoints[i];
+		if (bp.methodName != undefined && bp.methodName == fqmn) {
+			hit = bp;
+		}
+	}
+
+	if (hit) {
+		debugger;
+	}
+	
+}
+
+function BreakOnInstructionIfNecessary(threadContext) {
 	if (JavaBreakpoints.length == 0) {
 		return;
 	}
@@ -355,17 +392,17 @@ function DebugBreakIfNecessary(threadContext) {
 	let lineNumber = -1;
 	for (let j = 0; j < lineNumbers.length; j++) {
 		let lineEntry = lineNumbers[j];
-		if (lineEntry.start_pc > frame.pc) {
+		if (lineEntry.start_pc == frame.pc) {
+			lineNumber = lineEntry.line_number
 			break;
 		}
-		lineNumber = lineEntry.line_number;
 	}
 	
 	// See if there's a matching breakpoint.
 	let hit = null;
 	for (let i = 0; i < JavaBreakpoints.length; i++) {
 		let bp = JavaBreakpoints[i];
-		if (bp.fileName == sourceFileName && bp.lineNumber == lineNumber) {
+		if (bp.fileName != undefined && bp.fileName == sourceFileName && bp.lineNumber == lineNumber) {
 			hit = bp;
 		}
 	}
@@ -463,6 +500,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 		// If we're entering a method, say what it is
 		if (pc == 0) {
 			console.log("--> Entering " + frame.method.jclass.className + "." + frame.method.name);
+			BreakOnMethodStartIfNecessary(threadContext);
 		}	
 				
 		// Enter the primary execution loop		
@@ -470,7 +508,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			// update this before executing so it's present in case we need to dump the user stack
 			frame.pc = pc;       
 			
-			DebugBreakIfNecessary(threadContext);
+			BreakOnInstructionIfNecessary(threadContext);
 			
 			let opcode = code[pc];
 			let nextPc;
@@ -583,12 +621,12 @@ function RunJavaThreadWithMethod(startupMethod) {
 						break;
 					case CONSTANT_Float:
 						{
-							let bits = constref.bytes;
-							let sign = ((bits >>> 31) == 0) ? 1.0 : -1.0;
-							let e = ((bits >>> 23) & 0xff);
-							let m = (e == 0) ? (bits & 0x7fffff) << 1 : (bits & 0x7fffff) | 0x800000;
-							let f = sign * m * Math.pow(2, e - 150);
-							val = f;
+							let bytes = [];
+							bytes.push((constref.bytes >>> 24) & 0xFF);
+							bytes.push((constref.bytes >>> 16) & 0xFF);
+							bytes.push((constref.bytes >>> 8) & 0xFF);
+							bytes.push((constref.bytes) & 0xFF);
+							val = fromIEEE754Single(bytes);
 							break;
 						}
 					default:
@@ -598,6 +636,38 @@ function RunJavaThreadWithMethod(startupMethod) {
 						frame.operandStack.push(val);
 						nextPc = pc + instlen;
 					}
+					break;
+				}
+			case 0x14: // ldc2_w
+				{
+					let indexbyte1 = code[pc+1];
+					let indexbyte2 = code[pc+2];
+					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
+					let constref = frame.method.jclass.loadedClass.constantPool[index];
+					let val;
+					if (constref.tag == CONSTANT_Long) {
+						if (constref.high_bytes != 0) {
+							val = NaN;  // oh god
+						} else {
+							val = constref.low_bytes;
+						}
+					} else if (constref.tag == CONSTANT_Double) {
+						let bytes = [];
+						bytes.push((constref.high_bytes >>> 24) & 0xFF);
+						bytes.push((constref.high_bytes >>> 16) & 0xFF);
+						bytes.push((constref.high_bytes >>> 8) & 0xFF);
+						bytes.push((constref.high_bytes) & 0xFF);
+						bytes.push((constref.low_bytes >>> 24) & 0xFF);
+						bytes.push((constref.low_bytes >>> 16) & 0xFF);
+						bytes.push((constref.low_bytes >>> 8) & 0xFF);
+						bytes.push((constref.low_bytes) & 0xFF);						
+						val = fromIEEE754Double(bytes);
+					} else {
+						console.log("ERROR: ldc2_w trying to load a constant that's not a long or double");
+						val = undefined;
+					}
+					frame.operandStack.push(val);
+					nextPc = pc + 3;
 					break;
 				}
 			case 0x15: // iload
@@ -761,6 +831,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					break;
 				}
 			case 0x60: // iadd
+			case 0x61: // ladd
 				{
 					let add2 = frame.operandStack.pop();
 					let add1 = frame.operandStack.pop();
@@ -821,6 +892,26 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let value1 = frame.operandStack.pop();
 					let s = value2 & 0x1F;
 					let result = value1 << s;
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x79: // lshl
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let s = value2 & 0x3F;
+					let result = value1 << s;  // yeouch. this is not gonna work on anything actually "long"
+					frame.operandStack.push(result);
+					nextPc = pc + 1;
+					break;
+				}
+			case 0x7A: // ishr
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let s = value2 & 0x1F;
+					let result = value1 >> s;   // the JS >> operator does sign extension as ishr requires
 					frame.operandStack.push(result);
 					nextPc = pc + 1;
 					break;
@@ -1038,6 +1129,14 @@ function RunJavaThreadWithMethod(startupMethod) {
 					executeNewFrame = true;
 					break;
 				}
+			case 0xAF: // dreturn
+				{
+					let dval = frame.operandStack.pop();
+					PopVmStackFrame(threadContext, true);
+					threadContext.stack[0].operandStack.push(dval);
+					executeNewFrame = true;
+					break;
+				}
 			case 0xB0: // areturn
 				{
 					let aval = frame.operandStack.pop();
@@ -1131,20 +1230,14 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let jmethod = new JMethod(methodInfo.descriptor);
 					let nargs = jmethod.parameterTypes.length;
 					let args = frame.operandStack.splice(nargs * -1.0, nargs);
-					let jobj = frame.operandStack.pop();
-					
-					// let args = frame.operandStack.slice(nargs * -1.0, frame.operandStack.length);
-					// let jobj = frame.operandStack[frame.operandStack.length - nargs - 1];
+					let jobj = frame.operandStack.pop();					
 					args.unshift(jobj);
-					if (!jobj) {
-						DebugBacktrace(threadContext);
-						return;
-					}
 					// Resolve the method, using the target object's class.
 					
 					// If the method being requested is in a superclass of the *currently executing* method's class,
 					// then it represents an explicit or implicit call into a superclass, which means that we *don't*
 					// want to take overrides into account.
+					if (!jobj) debugger;
 					let contextClass = jobj.jclass;
 					if (IsClassASubclassOf(frame.method.jclass.className, methodInfo.className)) {
 						contextClass = null;
@@ -1500,11 +1593,11 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	// Inject system crap so we don't need JDK for super simple tests
 	InjectOutputMockObjects();
 	
-	// Create the VM startup thread. 
-	// let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
-	// if (initPhase1Method) {
-	// 	RunJavaThreadWithMethod(initPhase1Method);
-	// }
+	//Create the VM startup thread.
+	let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
+	if (initPhase1Method) {
+		RunJavaThreadWithMethod(initPhase1Method);
+	}
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();
