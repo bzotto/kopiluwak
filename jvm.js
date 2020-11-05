@@ -13,26 +13,25 @@ let ClassesToJavaLangClass = {};
 // Debugger infrastructure
 let JavaBreakpoints = [];  // { fileName: lineNumber} OR { methodName: fqmn }
 
-function AddClass(jclass) {
-	if (jclass.superclassName) {
+function AddClass(klclass) {
+	if (klclass.superclassName) {
 		// Find the superclass to ensure that the chain above is already loaded.
-		let superclass = ResolveClass(jclass.superclassName);
+		let superclass = ResolveClass(klclass.superclassName);
 	
 		if (!superclass) {
-			console.log("JVM: Cannot load " + jclass.className + " before superclass " + jclass.superclassName);
+			console.log("JVM: Cannot load " + klclass.className + " before superclass " + klclass.superclassName);
 			return;
 		}
 	
-		jclass.superclass = superclass;
+		klclass.superclass = superclass;
 	}
-	LoadedClasses.push(jclass);	
-	console.log("JVM: Loaded class " + jclass.className);
+	LoadedClasses.push(klclass);	
+	console.log("JVM: Loaded class " + klclass.className);
 }
 
 function LoadClassFromJDK(className) {
 	if (KLJDKClasses) {
-		let fqcn = className.replace(/\//g, ".");
-		let classFileBase64 = KLJDKClasses[fqcn];
+		let classFileBase64 = KLJDKClasses[className];
 		if (classFileBase64) {
 			let binaryStr = atob(classFileBase64);
 			let len = binaryStr.length;
@@ -47,8 +46,7 @@ function LoadClassFromJDK(className) {
 				return null;
 			}
 			let loadedClass = clresult.loadedClass;
-			let jclass = JClassFromLoadedClass(loadedClass);
-			return jclass;
+			return KLClassFromLoadedClass(loadedClass);
 		}
 	}
 	return null;
@@ -76,12 +74,11 @@ function ResolveClass(className) {
 	// Is this some kind of wacko primitive class??
 	if (/^\[?(B|Z|I|D|F|C|J|S|L.+;)$/.test(className)) {
 		// Sigh. Ok. Cook up a class object for this oddball thing. This is going to blow up on me.
-		let primitiveClass = new JClass({"className": className, "superclassName": "java/lang/Object" });
+		let primitiveClass = new KLClass({"className": className, "superclassName": "java.lang.Object" });
 		AddClass(primitiveClass);
 		return primitiveClass;
 	}
 	
-		
 	console.log("ERROR: Failed to resolve class " + className);
 	return null;
 }
@@ -91,29 +88,29 @@ function JavaLangStringObjForJSString(jsStr) {
     for (let i = 0; i < jsStr.length; i++) {
         bytes.push(jsStr.charCodeAt(i));
     }
-	let stringClass = ResolveClass("java/lang/String");
+	let stringClass = ResolveClass("java.lang.String");
 	stringObj = stringClass.createInstance();
-	stringObj.fieldValsByClass["java/lang/String"]["value"] = bytes;
-	stringObj.fieldValsByClass["java/lang/String"]["coder"] = 0;  // ???
+	stringObj.fieldValsByClass["java.lang.String"]["value"] = bytes;
+	stringObj.fieldValsByClass["java.lang.String"]["coder"] = 0;  // ???
 	stringObj.state = JOBJ_STATE_INITIALIZED;
 	return stringObj;
 }
 
-function JavaLangClassObjForClass(jclass) {
-	let jlcClass = ClassesToJavaLangClass[jclass];
-	if (!jlcClass) {
-		let classClass = ResolveClass("java/lang/Class");
+function JavaLangClassObjForClass(klclass) {
+	let jclass = ClassesToJavaLangClass[klclass];
+	if (!jclass) {
+		let classClass = ResolveClass("java.lang.Class");
 		if (!classClass) {
 			
 			// throw??
 		}
-		jlcClass = classClass.createInstance();
+		jclass = classClass.createInstance();
 		// Set the referenced class name. [!] This is supposed to be set by native method initClassName.
-		jlcClass.fieldValsByClass["java/lang/Class"]["name"] = JavaLangStringObjForJSString(jclass.className);
-		jlcClass.meta["classClass"] = jclass;
-		ClassesToJavaLangClass[jclass] = jlcClass;
+		jclass.fieldValsByClass["java.lang.Class"]["name"] = JavaLangStringObjForJSString(klclass.className);
+		jclass.meta["classClass"] = klclass;
+		ClassesToJavaLangClass[klclass] = jclass;
 	}
-	return jlcClass;
+	return jclass;
 }
 
 function IsClassASubclassOf(className1, className2) {
@@ -134,72 +131,72 @@ function IsClassASubclassOf(className1, className2) {
 	return false;
 }
 
-function ResolveMethodReference(methodInfo, contextClass) {
+function ResolveMethodReference(methodRef, contextClass) {
 	// In general, we look for the method directly in the vtable of the contextClass, which is how overidden
 	// methods are implemented here, with each subclass getting a full vtable of its whole inheritance chain.
 
 	if (!contextClass) {
-		contextClass = ResolveClass(methodInfo.className);
+		contextClass = ResolveClass(methodRef.className);
 	}
 	
 	// Note that we don't resolve the method's own class, because we might be dealing with a subclass that the
 	// originating methodInfo doesn't know about. The vtable on subclasses should already be setup to match
 	// inherited methods.
-	let methodIdentifier = methodInfo.methodName + "#" + methodInfo.descriptor;
-	var methodRef = contextClass.vtable[methodIdentifier];
+	let methodIdentifier = methodRef.methodName + "#" + methodRef.descriptor;
+	var method = contextClass.vtable[methodIdentifier];
 	
-	if (!methodRef) {
-		console.log("ERROR: Failed to resolve method " + methodInfo.methodName + " in " + methodInfo.className + " with descriptor " + methodInfo.descriptor);
+	if (!method) {
+		console.log("ERROR: Failed to resolve method " + methodRef.methodName + " in " + methodRef.className + " with descriptor " + methodRef.descriptor);
 		return null;
 	} 
 	
-	return methodRef;
+	return method;
 }
 
-function FindMainMethodReference() {
-	let methodIdentifier = "main#([Ljava/lang/String;)V";
-	let methodRef = null;
+function FindMainMethod() {
+	let methodIdentifier = "main#([Ljava.lang.String;)V";
+	let method = null;
 	
 	for (var i = 0; i < LoadedClasses.length; i++) {
-		var loadedClass = LoadedClasses[i];
-		methodRef = loadedClass.vtable[methodIdentifier];
-		if (methodRef && (methodRef.access & ACC_PUBLIC) && (methodRef.access & ACC_STATIC)) {
-			return methodRef;
+		var klclass = LoadedClasses[i];
+		method = klclass.vtable[methodIdentifier];
+		if (method && (method.access & ACC_PUBLIC) && (method.access & ACC_STATIC)) {
+			return method;
 		}
 	}
 	return null;
 }
 
-function ClassInitializationMethod(jclass) {
+function ClassInitializationMethod(klclass) {
 	let methodIdentifier = "<clinit>#()V";
-	return jclass.vtable[methodIdentifier];
+	return klclass.vtable[methodIdentifier];
 }
 
-function ResolveFieldReference(fieldInfo) {
-	let jclass = ResolveClass(fieldInfo.className);
+function ResolveFieldReference(fieldRef) {
+	let klclass = ResolveClass(fieldRef.className);
 	
-	if (jclass == null) {
-		console.log("ERROR: Failed to resolve class " + fieldInfo.className);
-		return {};
+	if (klclass == null) {
+		console.log("ERROR: Failed to resolve class " + fieldRef.className);
+		return null;
 	}
 	
-	let fieldClass = jclass;
-	let fieldRef = fieldClass.fields[fieldInfo.fieldName];
-	while (!fieldRef && fieldClass.superclassName != null) {
+	let fieldClass = klclass;
+	let field = fieldClass.fields[fieldRef.fieldName];
+	while (!field && fieldClass.superclassName != null) {
 		fieldClass = ResolveClass(fieldClass.superclassName);
-		fieldRef = fieldClass.fields[fieldInfo.fieldName];
+		field = fieldClass.fields[fieldRef.fieldName];
 	}
 		
 	// Fields match by name first, and then by desc. If we get a name match and fail 
 	// the desc match, it's a failure, even if in theory there may be a superclass which 
 	// defines a field with the same name and the correct type. 
-	if (!fieldRef || fieldRef.jtype.desc != fieldInfo.descriptor) {
-		console.log("ERROR: Failed to resolve field " + fieldInfo.fieldName + " in " + 
-			fieldInfo.className + " with descriptor " + fieldInfo.descriptor);
+	if (!field || field.jtype.desc != fieldRef.descriptor) {
+		console.log("ERROR: Failed to resolve field " + fieldRef.fieldName + " in " + 
+			fieldRef.className + " with descriptor " + fieldRef.descriptor);
 		return {};
 	}
 	
-	return { "jclass": fieldClass, "field": fieldRef };
+	return { "class": fieldClass, "field": field };
 }
 
 function Signed16bitValFromTwoBytes(val1, val2) {
@@ -212,10 +209,10 @@ function Signed16bitValFromTwoBytes(val1, val2) {
 }
 
 function ObjectIsA(jobj, className) {
-	if (jobj.jclass.className == className) {
+	if (jobj.class.className == className) {
 		return true;
 	}
-	let current = jobj.jclass;
+	let current = jobj.class;
 	while (current.superclassName) {
 		let superclassName = current.superclassName;
 		current = ResolveClass(superclassName);
@@ -229,7 +226,7 @@ function ObjectIsA(jobj, className) {
 }
 
 // >= 0 means a target was found. negative values mean there is no target for this exception
-function HandlerPcForException(jclass, currentPC, exceptionObj, exceptionTable) {
+function HandlerPcForException(klclass, currentPC, exceptionObj, exceptionTable) {
 	if (!exceptionTable) {
 		return -1;
 	}
@@ -242,8 +239,8 @@ function HandlerPcForException(jclass, currentPC, exceptionObj, exceptionTable) 
 				return exceptionEntry.handler_pc;
 			}
 			// Find target class
-			let targetClassRef = jclass.loadedClass.constantPool[exceptionEntry.catch_type];
-			let targetClassName = jclass.loadedClass.stringFromUtf8Constant(targetClassRef.name_index);
+			let targetClassRef = klclass.constantPool[exceptionEntry.catch_type];
+			let targetClassName = klclass.stringFromUtf8Constant(targetClassRef.name_index);
 			if (ObjectIsA(exceptionObj, targetClassName)) {
 				return exceptionEntry.handler_pc;
 			}
@@ -281,9 +278,9 @@ function DebugBacktrace(threadContext) {
 			}
 		}
 		// Is there a source file name?
-		let sourceFileName = frame.method.jclass.loadedClass.sourceFileName();
+		let sourceFileName = frame.method.class.sourceFileName();
 		
-		let fqmn = frame.method.jclass.className.replace(/\//g, ".") + "." + frame.method.name;
+		let fqmn = frame.method.class.className + "." + frame.method.name;
 		if (!sourceFileName) {
 			sourceFileName = "unknown";
 		}
@@ -299,18 +296,18 @@ function DebugBacktrace(threadContext) {
 	console.log(backtrace);
 }
 
-function CreateClassInitFrameIfNeeded(jclass) {
-	if (jclass.state == JCLASS_STATE_INITIALIZED) {
+function CreateClassInitFrameIfNeeded(klclass) {
+	if (klclass.state == KLCLASS_STATE_INITIALIZED) {
 		return null;
 	}
 	// Single-threaded VM allows us to also skip init entirely if we have already begun it
-	if (jclass.state == JCLASS_STATE_INITIALIZING) {
+	if (klclass.state == KLCLASS_STATE_INITIALIZING) {
 		return null;
 	}
 	
-	let clinitMethod = ClassInitializationMethod(jclass);
+	let clinitMethod = ClassInitializationMethod(klclass);
 	if (!clinitMethod) {
-		jclass.state = JCLASS_STATE_INITIALIZED;
+		klclass.state = KLCLASS_STATE_INITIALIZED;
 		return null;
 	}
 	return CreateStackFrame(clinitMethod);
@@ -324,7 +321,7 @@ function CreateObjInitFrameIfNeeded(jobj) {
 		return null;
 	}
 	let initIdentifier = "<init>#()V";
-	let initMethod = jobj.jclass.vtable[initIdentifier];
+	let initMethod = jobj.class.vtable[initIdentifier];
 	if (!initMethod) {
 		jobj.state = JOBJ_STATE_INITIALIZED;
 		return null;
@@ -356,7 +353,7 @@ function BreakOnMethodStartIfNecessary(threadContext) {
 		return;
 	}
 	let frame = threadContext.stack[0];
-	let fqmn = frame.method.jclass.className.replace(/\//g, ".") + "." + frame.method.name;
+	let fqmn = frame.method.jclass.className + "." + frame.method.name;
 	let hit = null;
 	for (let i = 0; i < JavaBreakpoints.length; i++) {
 		let bp = JavaBreakpoints[i];
@@ -425,7 +422,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 	
 		// Did we blow the stack?
 		// if (threadContext.stack.length > 10) {
-		// 	let soeClass = ResolveClass("java/lang/StackOverflowError");
+		// 	let soeClass = ResolveClass("java.lang.StackOverflowError");
 		// 	let soe = soeClass.createInstance();
 		//
 		// 	threadContext.stack[0].pendingExeption = soe;
@@ -475,11 +472,10 @@ function RunJavaThreadWithMethod(startupMethod) {
 			console.log("JVM: Eliding native method " + frame.method.jclass.className + "." + frame.method.name + " (desc: " + frame.method.jmethod.desc + ")");
 			let nativeFrame = PopVmStackFrame(threadContext, true);
 			let returnType = nativeFrame.method.jmethod.returnType;
-			if (returnType.isObject() || returnType.isArray()) {
-				threadContext.stack[0].operandStack.push(null);
-			} else if (!returnType.isVoid()) {
-				threadContext.stack[0].operandStack.push(0);
-			} 
+			if (!returnType.isVoid()) {
+				let defaultVal = DefaultObjectForJType(returnType);
+				threadContext.stack[0].operandStack.push(defaultVal);
+			}
 			continue;
 		}
 		
@@ -529,7 +525,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0x08: // iconst_5
 				{
 					let iconst = opcode - 3;
-					frame.operandStack.push(iconst);
+					frame.operandStack.push(new JInteger(JTYPE_INT, iconst));
 					nextPc = pc + 1;
 					break;
 				}
@@ -538,14 +534,14 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0x0D: // fconst_2
 				{
 					let fval = (opcode - 0x0B) * 1.0;
-					frame.operandStack.push(fval);
+					frame.operandStack.push(new JFloat(JTYPE_FLOAT, fval));
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x10: // bipush
 				{
 					let byte = code[pc+1];
-					frame.operandStack.push(byte);
+					frame.operandStack.push(new JInteger(JTYPE_BYTE, byte));
 					nextPc = pc + 2;
 					break;
 				}
@@ -554,7 +550,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let byte1 = code[pc+1];
 					let byte2 = code[pc+2];
 					let val = ((byte1 << 8) | byte2) >>> 0;
-					frame.operandStack.push(val);
+					frame.operandStack.push(new JInteger(JTYPE_SHORT, val));
 					nextPc = pc + 3;
 					break;
 				}
@@ -595,13 +591,13 @@ function RunJavaThreadWithMethod(startupMethod) {
 							let strconst = frame.method.jclass.loadedClass.constantPool[constref.string_index];
 							let strbytes = strconst.bytes;
 							// Create a string object to wrap the literal.
-							let strclass = ResolveClass("java/lang/String");
+							let strclass = ResolveClass("java.lang.String");
 							let strobj = strclass.createInstance();
 							let arrobj = new JArray(T_INT, strbytes.length);
 							arrobj.elements = strbytes;
 							// Rig the current frame and the child completion to land on the next instruction with the 
 							// stack looking right.
-							let initMethod = ResolveMethodReference({"className": "java/lang/String", "methodName": "<init>", "descriptor": "([III)V"});
+							let initMethod = ResolveMethodReference({"className": "java.lang.String", "methodName": "<init>", "descriptor": "([III)V"});
 							let initFrame = CreateStackFrame(initMethod);
 							initFrame.localVariables.push(strobj);
 							initFrame.localVariables.push(arrobj);
@@ -617,7 +613,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 						}						
 						break;
 					case CONSTANT_Integer:
-						val = constref.bytes;
+						val = new JInteger(JTYPE_INT, constref.bytes);
 						break;
 					case CONSTANT_Float:
 						{
@@ -626,7 +622,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 							bytes.push((constref.bytes >>> 16) & 0xFF);
 							bytes.push((constref.bytes >>> 8) & 0xFF);
 							bytes.push((constref.bytes) & 0xFF);
-							val = fromIEEE754Single(bytes);
+							val = new JFloat(JTYPE_FLOAT, fromIEEE754Single(bytes));
 							break;
 						}
 					default:
@@ -651,6 +647,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 						} else {
 							val = constref.low_bytes;
 						}
+						val = new JInteger(JTYPE_LONG, val);
 					} else if (constref.tag == CONSTANT_Double) {
 						let bytes = [];
 						bytes.push((constref.high_bytes >>> 24) & 0xFF);
@@ -660,8 +657,8 @@ function RunJavaThreadWithMethod(startupMethod) {
 						bytes.push((constref.low_bytes >>> 24) & 0xFF);
 						bytes.push((constref.low_bytes >>> 16) & 0xFF);
 						bytes.push((constref.low_bytes >>> 8) & 0xFF);
-						bytes.push((constref.low_bytes) & 0xFF);						
-						val = fromIEEE754Double(bytes);
+						bytes.push((constref.low_bytes) & 0xFF);	
+						val = new JFloat(JTYPE_DOUBLE, fromIEEE754Double(bytes));
 					} else {
 						console.log("ERROR: ldc2_w trying to load a constant that's not a long or double");
 						val = undefined;
@@ -677,6 +674,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0x19: // aload
 				{
 					let index = code[pc+1];
+					// Validate type correctness here.
 					frame.operandStack.push(frame.localVariables[index]);
 					nextPc = pc + 2;
 					break;
@@ -835,7 +833,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let add2 = frame.operandStack.pop();
 					let add1 = frame.operandStack.pop();
-					let res = add1 + add2;
+					let res = new JInteger(JTYPE_INT, add1.val + add2.val);
 					frame.operandStack.push(res);
 					nextPc = pc + 1;
 					break;
@@ -844,8 +842,8 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let result = value1 - value2;
-					frame.operandStack.push(result);
+					let res = new JInteger(JTYPE_INT, value1.val - value2.val);
+					frame.operandStack.push(res);
 					nextPc = pc + 1;
 					break;
 				}
@@ -853,18 +851,18 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let result = value1 * value2;
-					frame.operandStack.push(result);
+					let res = new JFloat(JTYPE_FLOAT, value1.val * value2.val);
+					frame.operandStack.push(res);
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x6C: // idiv
 				{
 					let value2 = frame.operandStack.pop();
-					let value1 = frame.operandStack.pop();
-					let div = value1 / value2;
+					let value1 = frame.operandStack.pop();					
+					let div = value1.val / value2.val;
 					let intresult = Math.trunc(div);
-					frame.operandStack.push(intresult);
+					frame.operandStack.push(new JInteger(JTYPE_INT, intresult));
 					nextPc = pc + 1;
 					break;
 				}
@@ -873,16 +871,16 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
 					// this would be a good place to check for zero divisor and throw a runtime exception
-					let result = value1 - (Math.trunc(value1 / value2)) * value2;
-					frame.operandStack.push(result);
+					let result = value1.val - (Math.trunc(value1.val / value2.val)) * value2.val;
+					frame.operandStack.push(new JInteger(JTYPE_INT, result));
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x74: // ineg
 				{
 					let value = frame.operandStack.pop();
-					let result = (~value) + 1;
-					frame.operandStack.push(result);
+					let result = (~value.val) + 1;
+					frame.operandStack.push(new JInteger(JTYPE_INT, result));
 					nextPc = pc + 1;
 					break;
 				}
@@ -890,9 +888,9 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let s = value2 & 0x1F;
-					let result = value1 << s;
-					frame.operandStack.push(result);
+					let s = value2.val & 0x1F;
+					let result = value1.val << s;
+					frame.operandStack.push(new JInteger(JTYPE_INT, result));
 					nextPc = pc + 1;
 					break;
 				}
@@ -900,9 +898,9 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let s = value2 & 0x3F;
-					let result = value1 << s;  // yeouch. this is not gonna work on anything actually "long"
-					frame.operandStack.push(result);
+					let s = value2.val & 0x3F;
+					let result = value1.val << s;  // yeouch. this is not gonna work on anything actually "long"
+					frame.operandStack.push(new JInteger(JTYPE_LONG, result));
 					nextPc = pc + 1;
 					break;
 				}
@@ -910,9 +908,9 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let s = value2 & 0x1F;
-					let result = value1 >> s;   // the JS >> operator does sign extension as ishr requires
-					frame.operandStack.push(result);
+					let s = value2.val & 0x1F;
+					let result = value1.val >> s;   // the JS >> operator does sign extension as ishr requires
+					frame.operandStack.push(new JInteger(JTYPE_INT, result));
 					nextPc = pc + 1;
 					break;
 				}
@@ -920,34 +918,50 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let s = value2 & 0x1F;
+					let s = value2.val & 0x1F;
 					let result;
-					if (value1 > 0) {
-						result = value1 >> s;
+					if (value1.val > 0) {
+						result = value1.val >> s;
 					} else {
-						result = (value1 >> s) + (2 << ~s);
+						result = (value1.val >> s) + (2 << ~s);
 					}
-					frame.operandStack.push(result);
+					frame.operandStack.push(new JInteger(JTYPE_INT, result));
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x7E: // iand
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let result = value1.val & value2.val;
+					frame.operandStack.push(new JInteger(JTYPE_INT, result));
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x7F: // land
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let result = value1 & value2;
-					frame.operandStack.push(result);
+					let result = value1.val & value2.val;
+					frame.operandStack.push(new JInteger(JTYPE_LONG, result));
 					nextPc = pc + 1;
 					break;
 				}
 			case 0x82: // ixor
+				{
+					let value2 = frame.operandStack.pop();
+					let value1 = frame.operandStack.pop();
+					let result = value1.val ^ value2.val;
+					frame.operandStack.push(new JInteger(JTYPE_INT, result));
+					nextPc = pc + 1;
+					break;
+				}
 			case 0x83: // lxor
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					let result = value1 ^ value2;
-					frame.operandStack.push(result);
+					let result = value1.val ^ value2.val;
+					frame.operandStack.push(new JInteger(JTYPE_LONG, result));
 					nextPc = pc + 1;
 					break;
 				}
@@ -955,14 +969,28 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let index = code[pc+1];
 					let c = code[pc+2];
-					let val = frame.localVariables[index];
+					let val = frame.localVariables[index].val;
 					val += c;
-					frame.localVariables[index] = val;
+					frame.localVariables[index] = new JInteger(JTYPE_INT, result);
 					nextPc = pc + 3;
 					break;	
 				}
 			case 0x85: // i2l
+				{
+					let val = frame.operandStack.pop();
+					let lval = new JInteger(JTYPE_LONG, val.val);
+					frame.operandStack.push(lval);
+					nextPc = pc + 1;
+					break;						
+				}
 			case 0x86: // i2f
+				{
+					let val = frame.operandStack.pop();
+					let fval = new JFloat(JTYPE_FLOAT, val.val);
+					frame.operandStack.push(fval);
+					nextPc = pc + 1;
+					break;						
+				}
 			case 0x87: // i2d
 				{
 					// NOTHING. Sneaky.
@@ -974,24 +1002,24 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let val = frame.operandStack.pop();
 					let result;
-					if (isNaN(val)) {
+					if (val.isNaN()) {
 						result = 0;
 					} else {
-						result = Math.trunc(val);
+						result = Math.trunc(val.val);
 					}
-					frame.operandStack.push(result);
+					frame.operandStack.push(JInteger(JTYPE_INT, result));
 					nextPc = pc + 1;
 					break;						
 				}
 			case 0x91: // i2b
 				{
 					let val = frame.operandStack.pop();
-					val = val & 0x000000FF;
-					if ((val & 0x00000080) > 0) {
+					let result = val.val & 0x000000FF;
+					if ((result & 0x00000080) > 0) {
 						// sign extend to int size
-						val = val | 0xFFFFFF00;
+						result = result | 0xFFFFFF00;
 					}
-					frame.operandStack.push(val);
+					frame.operandStack.push(JInteger(JTYPE_BYTE, result));
 					nextPc = pc + 1;
 					break;
 				}
@@ -1000,18 +1028,18 @@ function RunJavaThreadWithMethod(startupMethod) {
 				{
 					let value2 = frame.operandStack.pop();
 					let value1 = frame.operandStack.pop();
-					if (value1 == NaN || value2 == NaN) {
+					if (value1.isNaN() || value2.isNaN()) {
 						if (opcode == 0x95) {
-							frame.operandStack.push(-1);
+							frame.operandStack.push(JInteger(JTYPE_INT, -1));
 						} else {
-							frame.operandStack.push(1);
+							frame.operandStack.push(JInteger(JTYPE_INT, 1));
 						}
 					} else if (value1 > value2) {
-						frame.operandStack.push(1);
+						frame.operandStack.push(JInteger(JTYPE_INT, 1));
 					} else if (value1 == value2) {
-						frame.operandStack.push(0);
+						frame.operandStack.push(JInteger(JTYPE_INT, 0));
 					} else if (value1 < value2) {
-						frame.operandStack.push(-1);
+						frame.operandStack.push(JInteger(JTYPE_INT, -1));
 					}
 					nextPc = pc + 1;
 					break;
@@ -1024,6 +1052,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0x9E: // ifle
 				{
 					let val = frame.operandStack.pop();
+					val = val.val;
 					let doBranch = false;
 					switch (opcode) {
 					case 0x99: 
@@ -1062,8 +1091,8 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0xA3: // if_icmpgt
 			case 0xA4: // if_icmple
 				{
-					let value2 = frame.operandStack.pop();
-					let value1 = frame.operandStack.pop();
+					let value2 = frame.operandStack.pop().val;
+					let value1 = frame.operandStack.pop().val;
 					let doBranch = false;
 					switch (opcode) {
 					case 0x9F:
@@ -1311,7 +1340,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0xBC: // newarray
 				{
 					let atype = code[pc+1];
-					let count = frame.operandStack.pop();
+					let count = frame.operandStack.pop().val;
 					let newarray = new JArray(atype, count);
 					frame.operandStack.push(newarray);
 					nextPc = pc + 2;
@@ -1325,7 +1354,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let constref = frame.method.jclass.loadedClass.constantPool[index];
 					let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(constref.name_index);
 					let arrayClass = ResolveClass(className);
-					let count = frame.operandStack.pop();
+					let count = frame.operandStack.pop().val;
 					let newarray = new JArray(arrayClass, count);
 					frame.operandStack.push(newarray);
 					nextPc = pc + 3;
@@ -1334,7 +1363,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0xBF: // athrow
 				{
 					let throwable = frame.operandStack.pop();
-					if (!ObjectIsA(throwable, "java/lang/Throwable")) {
+					if (!ObjectIsA(throwable, "java.lang.Throwable")) {
 						console.log("JVM: Can't throw object of class " + throwable.jclass.className);
 					}
 					let handlerPc = HandlerPcForException(frame.method.jclass, pc, throwable, frame.method.exceptions);
@@ -1392,7 +1421,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			case 0xBE: // arraylength
 				{
 					let arrayref = frame.operandStack.pop();
-					frame.operandStack.push(arrayref.count);
+					frame.operandStack.push(new JInteger(JTYPE_INT, arrayref.count));
 					nextPc = pc + 1;
 					break;
 				}
@@ -1409,7 +1438,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 						let classOrArrayOrInterfaceRef = frame.method.jclass.loadedClass.constantPool[index];
 						let className = frame.method.jclass.loadedClass.stringFromUtf8Constant(classOrArrayOrInterfaceRef.name_index);
 						let castOK = false;
-						if (className == "java/lang/String") {
+						if (className == "java.lang.String") {
 							if (typeof obj == 'string') {
 								castOK = true;
 							}
@@ -1487,105 +1516,50 @@ function RunJavaThreadWithMethod(startupMethod) {
 	return 0;
 }
 
-function JClassFromLoadedClass(loadedClass) {
-	let jclass = new JClass(loadedClass);
+function KLClassFromLoadedClass(loadedClass) {
+	// Resolve the superclass for this class.
+	let superclass = ResolveClass(loadedClass.superclassName);	
 	
-	// The vtable for each class starts out as a copy of its superclass's vtable, if there
-	// is one.
-	let jsuperclass = ResolveClass(jclass.superclassName);	
-	jclass.vtable = jsuperclass ? Object.assign({}, jsuperclass.vtable) : {};
-
-	// Walk the methods in the class and patch them up.
-	for (let i = 0; i < loadedClass.methods.length; i++) {
-		let method = loadedClass.methods[i];
-		let name = loadedClass.stringFromUtf8Constant(method.name_index);
-		let desc = loadedClass.stringFromUtf8Constant(method.descriptor_index);
-		let access_flags = method.access_flags;
-		
-		// Is there code?	
-		let codeAttr = null;
-		for (var j = 0; j < method.attributes.length; j++) {
-			let attr = method.attributes[j];
-			let attrname = loadedClass.stringFromUtf8Constant(attr.attribute_name_index);
-			if (attrname == "Code") {
-				codeAttr = attr;
-				break;
+	// Create the class object.
+	let klclass = new KLClass(loadedClass, superclass);
+	
+	// Find and patch in native bindings for this class.
+	let classImpls = KLNativeImpls[klclass.className];
+	if (classImpls) {
+		for (let methodIdentifier in klclass.vtable) {
+			let method = klclass.vtable[methodIdentifier];
+			if (!method.code && (method.access & ACC_NATIVE) != 0) {
+				method.impl = classImpls[methodIdentifier];
 			}
-		}
-		
-		let methodIdentifier = name + "#" + desc;
-		
-		// If there's no code, maybe we have a native impl.
-		let impl = null;
-		if (!codeAttr && ((access_flags & ACC_NATIVE) != 0)) {
-			let classImpls = KLNativeImpls[jclass.className];
-			if (classImpls) {
-				impl = classImpls[methodIdentifier];
-			}
-		}
-		
-		// Find a line number table if one exists.
-		let lineNumberTable = null;
-		if (codeAttr && codeAttr.attributes) {
-			for (let j = 0; j < codeAttr.attributes.length; j++) {
-				let attr = codeAttr.attributes[j];
-				let attrname = loadedClass.stringFromUtf8Constant(attr.attribute_name_index);
-				if (attrname == "LineNumberTable") {
-					lineNumberTable = attr.line_number_table;
-					break;
-				}
-			}
-		}
-		
-		// The implementing jclass is included because the vtable gets copied to subclasses upon load.
-		jclass.vtable[methodIdentifier] = { 
-			"name": name, 
-			"jclass": jclass,
-			"jmethod": new JMethod(desc), 
-			"access": access_flags, 
-			"impl": impl, 
-			"code": codeAttr ? codeAttr.code : null,
-			"exceptions": codeAttr ? codeAttr.exception_table : null,
-			"lineNumbers": lineNumberTable 
-		};
+		}		
 	}
-	
-	// Walk the fields in the class and patch them up!
-	for (var i = 0; i < loadedClass.fields.length; i++) {
-		var field = loadedClass.fields[i];
-		var name = loadedClass.stringFromUtf8Constant(field.name_index);
-		var desc = loadedClass.stringFromUtf8Constant(field.descriptor_index);
-		var access_flags = field.access_flags;
 		
-		jclass.fields[name] = { "jtype": new JType(desc), "access": access_flags };
-	}
-	
-	return jclass;
+	return klclass;
 }
 
 function InjectOutputMockObjects() {
 		
-	// Stuff that lets us print stuff to the console. 
-	// var javaIoPrintStreamLoadedClass = new JLoadedClass("java/io/PrintStream", "java/lang/Object", [], [], [], []);
-	// var javaIoPrintStreamJclass = new JClass(javaIoPrintStreamLoadedClass);
-	// javaIoPrintStreamJclass.vtable["println#(Ljava/lang/String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava/lang/String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
-	// 	function(jobj, x) {
-	// 		console.log(x);
-	// 	}
-	// };
-	// javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
-	// 	function(jobj, x) {
-	// 		console.log(x);
-	// 	}
-	// };
-	// AddClass(javaIoPrintStreamJclass);
-	// var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
-	//
-	// var javaLangSystemLoadedClass = new JLoadedClass("java/lang/System", "java/lang/Object", [], [], [], []);
-	// var javaLangSystemJclass = new JClass(javaLangSystemLoadedClass);
-	// javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava/io/PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
-	// javaLangSystemJclass.fieldValsByClass["java/lang/System"]["out"] = systemOutStreamObj;
-	// AddClass(javaLangSystemJclass);
+	// Stuff that lets us print stuff to the console.
+	var javaIoPrintStreamLoadedClass = new KLLoadedClass("java.io.PrintStream", "java.lang.Object", [], [], [], []);
+	var javaIoPrintStreamJclass = new KLClass(javaIoPrintStreamLoadedClass);
+	javaIoPrintStreamJclass.vtable["println#(Ljava.lang.String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava.lang.String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
+		function(jobj, x) {
+			console.log(x);
+		}
+	};
+	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
+		function(jobj, x) {
+			console.log(x);
+		}
+	};
+	AddClass(javaIoPrintStreamJclass);
+	var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
+
+	var javaLangSystemLoadedClass = new KLLoadedClass("java.lang.System", "java.lang.Object", [], [], [], []);
+	var javaLangSystemJclass = new KLClass(javaLangSystemLoadedClass);
+	javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava.io.PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
+	javaLangSystemJclass.fieldValsByClass["java.lang.System"]["out"] = systemOutStreamObj;
+	AddClass(javaLangSystemJclass);
 }
 
 function LoadClassAndExecute(mainClassHex, otherClassesHex) {
@@ -1594,10 +1568,11 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	InjectOutputMockObjects();
 	
 	//Create the VM startup thread.
-	let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
-	if (initPhase1Method) {
-		RunJavaThreadWithMethod(initPhase1Method);
-	}
+	// let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
+	// if (initPhase1Method) {
+	// 	let ctx = new KLThreadContext(initPhase1Method);
+	// 	ctx.exec();
+	// }
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();
@@ -1606,9 +1581,9 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 		return clresult.error;
 	}
 	let loadedClass = clresult.loadedClass;
-	let jclass = JClassFromLoadedClass(loadedClass);
-	AddClass(jclass);
-	let mainClass = jclass;
+	let klclass = KLClassFromLoadedClass(loadedClass);
+	AddClass(klclass);
+	let mainClass = klclass;
 	
 	// Load any auxiliary classes on offer.
 	for (let i = 0; i < otherClassesHex.length; i++) {
@@ -1616,14 +1591,15 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 		if (clresult.error) {
 			return "error loading aux class " + i + "" + clresult.error;
 		}
-		jclass = JClassFromLoadedClass(clresult.loadedClass);
-		AddClass(jclass);
+		klclass = KLClassFromLoadedClass(clresult.loadedClass);
+		AddClass(klclass);
 	}
 	
 	// one of these classes has a main method in it, find it.	
-	var methodRef = FindMainMethodReference();
-	if (methodRef) {
-		RunJavaThreadWithMethod(methodRef);
+	var mainMethod = FindMainMethod();
+	if (mainMethod) {
+		let ctx = new KLThreadContext(mainMethod);
+		ctx.exec();
 	} else {
 		return "Didn't find main method entry point"
 	}

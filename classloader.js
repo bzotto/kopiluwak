@@ -6,6 +6,15 @@
 // Requires: constants, objects 
 //
 
+function KLLoadedClass(className, superclassName, constantPool, fields, methods, attributes) {
+	this.className = className;
+	this.superclassName = superclassName;
+	this.constantPool = constantPool;
+	this.fields = fields;
+	this.methods = methods;
+	this.attributes = attributes;
+}
+
 function KLClassLoader(classFileHexStringOrBytes) {
 	
 	let ClassFileData;
@@ -316,13 +325,13 @@ function KLClassLoader(classFileHexStringOrBytes) {
 			return { "error": "Mismatch class file parse length" };
 		}
 
-		let className = stringFromUtf8Constant(ConstantPool[thisClass].name_index);
-		let superClassName = superClass == 0 ? null : stringFromUtf8Constant(ConstantPool[superClass].name_index);
+		let className = stringFromUtf8Constant(ConstantPool[thisClass].name_index).replace(/\//g, ".");
+		let superClassName = superClass == 0 ? null : stringFromUtf8Constant(ConstantPool[superClass].name_index).replace(/\//g, ".");
 
 		// XXX: we parsed interfaces and access flags but aren't yet using them here.
 		
-		let jloadedClass = new JLoadedClass(className, superClassName, ConstantPool, fields, methods, attributes);
-		return { "loadedClass": jloadedClass };
+		let loadedClass = new KLLoadedClass(className, superClassName, ConstantPool, fields, methods, attributes);
+		return { "loadedClass": loadedClass };
 	};
 	
 	this.loadFromHexString = function(hexString) {
