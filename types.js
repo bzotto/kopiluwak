@@ -8,8 +8,8 @@
 // JTYPE constant definitions.
 //
 
-const JTYPE_INVALID = 0;
 // Reference types
+const JTYPE_NULL = 0;
 const JTYPE_CLASS = 1;  
 const JTYPE_ARRAY = 2;
 const JTYPE_INTERFACE = 3;
@@ -35,7 +35,7 @@ const JTYPE_RETURNADDR = 12;
 //
 function JType(typeOrDescriptor) {
 
-	this.type = JTYPE_INVALID; // a JTYPE_* value
+	this.type = JTYPE_NULL; // a JTYPE_* value
 	this.name = null; // the name of a class or interface   
 	this.dimensions = 0; // number of dimensions of an array
 	this.componentType = null; // the type contained within an array. (Another JType instance.)
@@ -57,11 +57,14 @@ function JType(typeOrDescriptor) {
 	// Public predicates and accessors.
 	//
 	
+	this.isNull = function() {
+		return this.type == JTYPE_NULL;
+	}
 	this.isPrimitiveType = function() {
 		return this.type >= 4 && this.type <= 12;
 	}
 	this.isReferenceType = function() {
-		return this.type >= 1 && this.type <= 3;
+		return this.type >= 0 && this.type <= 3;
 	}
 	this.isClass = function() {
 		return this.type == JTYPE_CLASS;
@@ -147,10 +150,11 @@ function JType(typeOrDescriptor) {
 		case JTYPE_BOOLEAN:
 			return "Z";
 			
+		case JTYPE_NULL:
 		case JTYPE_RETURNADDR:
-		case JTYPE_INVALID:
 			// We can produce a descriptor string for all types except return address, 
-			// which doesn't map to a Java language type and doesn't show up in descriptors.
+			// which doesn't map to a Java language type and doesn't show up in descriptors. Null is a synthetic 
+			// placeholder, not a real type, and thus is not meaningful in descriptors.
 			return null;
 		}
 	}
@@ -161,9 +165,9 @@ function JType(typeOrDescriptor) {
 	
 	if (typeof typeOrDescriptor == 'number') {
 		let type = typeOrDescriptor;
-		if (type < 4 || type > 12) {
+		if (type != JTYPE_NULL && (type < 4 || type > 12)) {
 			console.log("JType: can't create with numeric type " + type);
-			type = JTYPE_INVALID;
+			type = JTYPE_NULL;
 		}
 		this.type = type;
 	} else if (typeof typeOrDescriptor == 'string') {

@@ -5,15 +5,15 @@
 // 
 
 function JNull() {
-	this.isa = JTYPE_CLASS;
-	this.isReference = true;
-	this.isPrimitive = false;
+	this.isa = new JType(JTYPE_NULL);
 }
+
 const JOBJ_STATE_UNINITIALIZED = 0;
 const JOBJ_STATE_INITIALIZING  = 1;
 const JOBJ_STATE_INITIALIZED   = 2;
 
 function JObj(klclass) {
+	this.isa = new JType("L" + klclass.className + ";");
 	this.class = klclass;
 	this.state = JOBJ_STATE_UNINITIALIZED;
 	this.fieldValsByClass = {};			// keyed by classname:{name:value}
@@ -26,81 +26,84 @@ function JObj(klclass) {
 		this.fieldValsByClass[curclass.className] = {};
 		curclass = curclass.superclass;
  	} while (curclass);
-	
-	this.isa = JTYPE_CLASS;
-	this.isReference = true;
-	this.isPrimitive = false;
 }
 
-function JArray(classOrType, count) {
+function JArray(type, count) {
+	this.isa = new JType("[" + type.descriptorString());
 	this.class = null;
 	this.atype = 0;
 	this.monitor = 0;
-	if (Number.isInteger(classOrType)) {
-		this.atype = classOrType;
-	} else {
-		this.class = classOrType;
-	}
 	this.count = count;
 	this.elements = [];
 	for (let i = 0; i < count; i++) {
 		this.elements[i] = null;
 	}
-	
-	this.isa = JTYPE_ARRAY;
-	this.isReference = true;
-	this.isPrimitive = false;
 }
 
-function JInteger(isa, val) {
-	this.val = (val != undefined) ? val : 0; // all integral values are zero, and the char 0 = '\u00000 (== 0)
-	this.isa = isa;
-	this.isReference = false;
-	this.isPrimitive = true;
+function JByte(val) {
+	this.isa = new JType(JTYPE_BYTE);
+	this.val = (val != undefined) ? val : 0; 
 }
 
-function JFloat(isa, val) {
+function JShort(val) {
+	this.isa = new JType(JTYPE_SHORT);
+	this.val = (val != undefined) ? val : 0; 
+}
+
+function JInt(val) {
+	this.isa = new JType(JTYPE_INT);
+	this.val = (val != undefined) ? val : 0; 
+}
+
+function JLong(val) {
+	this.isa = new JType(JTYPE_LONG);
+	this.val = (val != undefined) ? val : 0n;
+}
+
+function JChar(val) {
+	this.isa = new JType(JTYPE_CHAR);
+	this.val = (val != undefined) ? val : 0; 
+}
+
+function JFloat(val) {
+	this.isa = new JType(JTYPE_FlOAT);
 	this.val = (val != undefined) ? val : +0.0;
-	this.isa = isa;
-	this.isReference = false;
-	this.isPrimitive = true;
-	
-	this.isNaN = function() { return isNaN(this.val); }
+}
+
+function JDouble(val) {
+	this.isa = new JType(JTYPE_DOUBLE);
+	this.val = (val != undefined) ? val : +0.0;
 }
 
 function JBoolean(val) {
+	this.isa = new JType(JTYPE_BOOLEAN);
 	this.val = (val != undefined) ? val : false;
-	this.isa = JTYPE_BOOLEAN;
-	this.isReference = false;
-	this.isPrimitive = true;
 }
 
-function JReturnAddress(val) {
+function JReturnAddr(val) {
+	this.isa = new JType(JTYPE_RETURNADDR);
 	this.val = (val != undefined) ? val : 0; 
-	this.isa = JTYPE_RETURNADDR;
-	this.isReference = false;
-	this.isPrimitive = true;
 }
 
 function DefaultValueForType(jtype) {
 	// Default for reference types is null.
 	if (jtype.isReferenceType()) {
-		return null;
+		return new JNull();
 	}
 	if (jtype.isByte()) {
-		return new JInteger(JTYPE_BYTE);
+		return new JByte();
 	} else if (jtype.isChar()) {
-		return new JInteger(JTYPE_CHAR);
+		return new JChar();
 	} else if (jtype.isShort()) {
-		return new JInteger(JTYPE_SHORT);
+		return new JShort();
 	} else if (jtype.isInt()) {
-		return new JInteger(JTYPE_INT);
+		return new JInt();
 	} else if (jtype.isLong()) {
-		return new JInteger(JTYPE_LONG);
+		return new JLong();
 	} else if (jtype.isFloat()) {
-		return new JFloat(JTYPE_FLOAT);
+		return new JFloat();
 	} else if (jtype.isDouble()) {
-		return new JFloat(JTYPE_DOUBLE);
+		return new JDouble();
 	} else if (jtype.isBoolean()) {
 		return new JBoolean();
 	} 
@@ -131,6 +134,8 @@ function KLClass(loadedClass, superclass) {
 	// Keep the constant pool and attributes around. We'll need them for runtime lookups.
 	this.constantPool = loadedClass.constantPool;
 	this.attributes = loadedClass.attributes;
+		
+	this.typeOfInstances = new JType("L" + this.className + ";");
 		
 	this.createInstance = function() {
 		var jobj = new JObj(this);

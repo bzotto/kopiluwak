@@ -174,7 +174,7 @@ function KLThreadContext(bootstrapMethod) {
 	
 	this.instructionHandlers = [];
 	this.instructionHandlers[INSTR_aconst_null] = function(frame) {
-		frame.operandStack.push(null);
+		frame.operandStack.push(new JNull());
 		IncrementPC(frame, 1);
 	};
 	
@@ -214,7 +214,7 @@ function KLThreadContext(bootstrapMethod) {
 					// Create a string object to wrap the literal.
 					let strclass = ResolveClass("java.lang.String");
 					let strobj = strclass.createInstance();
-					let arrobj = new JArray(T_INT, strbytes.length);
+					let arrobj = new JArray(new JType(JTYPE_INT), strbytes.length);
 					arrobj.elements = strbytes;
 					// Rig the current frame and the child completion to land on the next instruction with the 
 					// stack looking right.
@@ -276,7 +276,7 @@ function KLThreadContext(bootstrapMethod) {
 	
 	const handler_iconst_n = function(frame, opcode) {
 		let val = opcode - INSTR_iconst_0;
-		frame.operandStack.push(new JInteger(JTYPE_INT, val));
+		frame.operandStack.push(new JInt(val));
 		IncrementPC(frame, 1);
 	}
 	this.instructionHandlers[INSTR_iconst_m1] = handler_iconst_n;
@@ -293,7 +293,7 @@ function KLThreadContext(bootstrapMethod) {
 		let className = frame.method.class.classNameFromUtf8Constant(constref.name_index);
 		let arrayClass = ResolveClass(className);
 		let count = frame.operandStack.pop().val;
-		let newarray = new JArray(arrayClass, count);
+		let newarray = new JArray(arrayClass.typeOfInstances, count);
 		frame.operandStack.push(newarray);
 		IncrementPC(frame, 3);
 	}
