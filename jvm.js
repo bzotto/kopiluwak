@@ -140,7 +140,7 @@ function ResolveMethodReference(methodRef, contextClass) {
 	}
 	
 	// Note that we don't resolve the method's own class, because we might be dealing with a subclass that the
-	// originating methodInfo doesn't know about. The vtable on subclasses should already be setup to match
+	// originating methodRef doesn't know about. The vtable on subclasses should already be setup to match
 	// inherited methods.
 	let methodIdentifier = methodRef.methodName + "#" + methodRef.descriptor;
 	var method = contextClass.vtable[methodIdentifier];
@@ -190,7 +190,7 @@ function ResolveFieldReference(fieldRef) {
 	// Fields match by name first, and then by desc. If we get a name match and fail 
 	// the desc match, it's a failure, even if in theory there may be a superclass which 
 	// defines a field with the same name and the correct type. 
-	if (!field || field.jtype.desc != fieldRef.descriptor) {
+	if (!field || field.type.descriptorString() != fieldRef.descriptor) {
 		console.log("ERROR: Failed to resolve field " + fieldRef.fieldName + " in " + 
 			fieldRef.className + " with descriptor " + fieldRef.descriptor);
 		return {};
@@ -1256,7 +1256,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
 					let methodInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(index);
 					// Build descriptor so we know how to find the target object.
-					let jmethod = new JMethod(methodInfo.descriptor);
+					let jmethod = new KLMethodDescriptor(methodInfo.descriptor);
 					let nargs = jmethod.parameterTypes.length;
 					let args = frame.operandStack.splice(nargs * -1.0, nargs);
 					let jobj = frame.operandStack.pop();					
@@ -1290,7 +1290,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 					let index = ((indexbyte1 << 8) | indexbyte2) >>> 0;
 					let methodInfo = frame.method.jclass.loadedClass.methodInfoFromIndex(index);
 					// Build descriptor so we know how to find the target object.
-					let jmethod = new JMethod(methodInfo.descriptor);
+					let jmethod = new KLMethodDescriptor(methodInfo.descriptor);
 					let nargs = jmethod.parameterTypes.length;
 					let args = frame.operandStack.splice(nargs * -1.0, nargs);
 					let jobj = frame.operandStack.pop();
@@ -1542,12 +1542,12 @@ function InjectOutputMockObjects() {
 	// Stuff that lets us print stuff to the console.
 	var javaIoPrintStreamLoadedClass = new KLLoadedClass("java.io.PrintStream", "java.lang.Object", [], [], [], []);
 	var javaIoPrintStreamJclass = new KLClass(javaIoPrintStreamLoadedClass);
-	javaIoPrintStreamJclass.vtable["println#(Ljava.lang.String;)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(Ljava.lang.String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
+	javaIoPrintStreamJclass.vtable["println#(Ljava.lang.String;)V"] = { "name": "println", "class": javaIoPrintStreamJclass, "descriptor": new KLMethodDescriptor("(Ljava.lang.String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
 		function(jobj, x) {
 			console.log(x);
 		}
 	};
-	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "jclass": javaIoPrintStreamJclass, "jmethod": new JMethod("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
+	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "class": javaIoPrintStreamJclass, "descriptor": new KLMethodDescriptor("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
 		function(jobj, x) {
 			console.log(x);
 		}
@@ -1557,7 +1557,7 @@ function InjectOutputMockObjects() {
 
 	var javaLangSystemLoadedClass = new KLLoadedClass("java.lang.System", "java.lang.Object", [], [], [], []);
 	var javaLangSystemJclass = new KLClass(javaLangSystemLoadedClass);
-	javaLangSystemJclass.fields["out"] = { "jtype": new JType("Ljava.io.PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
+	javaLangSystemJclass.fields["out"] = { "type": new JType("Ljava.io.PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
 	javaLangSystemJclass.fieldValsByClass["java.lang.System"]["out"] = systemOutStreamObj;
 	AddClass(javaLangSystemJclass);
 }

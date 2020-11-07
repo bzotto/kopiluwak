@@ -81,7 +81,8 @@ function KLThreadContext(bootstrapMethod) {
 			// 2. If this method is native and either has a bound implementation that is not bytecode or has no implementation.
 			if (pc == 0) {
 				// If we are starting to execute a method contained in a class which is not yet initialized, then 
-				// stop and initialize the class if appropriate.
+				// stop and initialize the class if appropriate. We check this first, because we'll need to do this 
+				// whether or not the method itself has a native implementation.
 				let clinitFrame = CreateClassInitFrameIfNeeded(frame.method.class);
 				if (clinitFrame) {
 					frame.method.class.state = KLCLASS_STATE_INITIALIZING;
@@ -89,23 +90,24 @@ function KLThreadContext(bootstrapMethod) {
 					continue;
 				}
 				
-				
+				// If this is a native method, either execute it or if not present, pretend it executed and returned
+				// some default value. 
 				if ((frame.method.access & ACC_NATIVE) != 0) {
 					// Check if this is a native method we don't support. If so, log it and return a default value.
 					if (frame.method.impl) {
 						// Execute the native method impl if present.
-						let hasresult = (!frame.method.jmethod.returnType.isVoid());
+						let hasresult = !frame.method.descriptor.returnsVoid();
 						let result = frame.method.impl.apply(null, frame.localVariables);
 						this.popFrame();
 						if (hasresult) {
 							this.stack[0].operandStack.push(result);
 						}
 					} else {				
-						console.log("JVM: Eliding native method " + frame.method.class.className + "." + frame.method.name + " (desc: " + frame.method.jmethod.desc + ")");
+						console.log("JVM: Eliding native method " + frame.method.class.className + "." + frame.method.name + " (desc: " + frame.method.descriptor.descriptorString() + ")");
 						let nativeFrame = this.popFrame();
-						let returnType = nativeFrame.method.jmethod.returnType;
-						if (!returnType.isVoid()) {
-							let defaultVal = DefaultObjectForJType(returnType);
+						if (!frame.method.descriptor.returnsVoid()) {
+							let returnType = nativeFrame.method.descriptor.returnType();
+							let defaultVal = DefaultValueForType(returnType);
 							this.stack[0].operandStack.push(defaultVal);
 						}
 					} 

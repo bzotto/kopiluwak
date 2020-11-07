@@ -1,29 +1,17 @@
-
-// Reference types
-const JTYPE_CLASS = 1;
-const JTYPE_ARRAY = 2;
-const JTYPE_INTERFACE = 3;
-// Primitive types
-const JTYPE_BYTE = 4
-const JTYPE_SHORT = 5;
-const JTYPE_INT = 6;
-const JTYPE_LONG = 7;
-const JTYPE_CHAR = 8;
-const JTYPE_FLOAT = 9;
-const JTYPE_DOUBLE = 10;
-const JTYPE_BOOLEAN = 11;
-const JTYPE_RETURNADDR = 12;
-
-
-const JOBJ_STATE_UNINITIALIZED = 0;
-const JOBJ_STATE_INITIALIZING  = 1;
-const JOBJ_STATE_INITIALIZED   = 2;
+// 
+// objects.js 
+//
+// Kopiluwak. Copyright (c) 2020 Ben Zotto
+// 
 
 function JNull() {
 	this.isa = JTYPE_CLASS;
 	this.isReference = true;
 	this.isPrimitive = false;
 }
+const JOBJ_STATE_UNINITIALIZED = 0;
+const JOBJ_STATE_INITIALIZING  = 1;
+const JOBJ_STATE_INITIALIZED   = 2;
 
 function JObj(klclass) {
 	this.class = klclass;
@@ -94,9 +82,9 @@ function JReturnAddress(val) {
 	this.isPrimitive = true;
 }
 
-function DefaultObjectForJType(jtype) {
+function DefaultValueForType(jtype) {
 	// Default for reference types is null.
-	if (jtype.isObject() || jtype.isArray()) {
+	if (jtype.isReferenceType()) {
 		return null;
 	}
 	if (jtype.isByte()) {
@@ -117,7 +105,7 @@ function DefaultObjectForJType(jtype) {
 		return new JBoolean();
 	} 
 	
-	alert("assert: DefaultObjectForJType can't work with JType: " + jtype.desc);
+	alert("assert: DefaultValueForType can't work with JType: " + jtype.descriptorString());
 	return null;
 }
 
@@ -133,8 +121,8 @@ function KLClass(loadedClass, superclass) {
 	this.state = KLCLASS_STATE_UNINITIALIZED;
 	this.monitor = 0;
 	
-	this.fields = {};			// keyed by name, { jtype: JType, access: access }
-	this.vtable = {};			// keyed by identifer, { jmethod: JMethod, access: access, impl:  function }
+	this.fields = {};			// keyed by name
+	this.vtable = {};			// keyed by identifer
 	
 	// static data
 	this.fieldValsByClass = {};	// keyed by classname:{name:value}
@@ -256,7 +244,7 @@ function KLClass(loadedClass, superclass) {
 		this.vtable[methodIdentifier] = { 
 			"name": name, 
 			"class": this,
-			"jmethod": new JMethod(desc), 
+			"descriptor": new KLMethodDescriptor(desc), 
 			"access": access_flags, 
 			"impl": null, 
 			"code": codeAttr ? codeAttr.code : null,
@@ -272,7 +260,7 @@ function KLClass(loadedClass, superclass) {
 		var desc = this.descriptorFromUtf8Constant(field.descriptor_index);
 		var access_flags = field.access_flags;
 		
-		this.fields[name] = { "jtype": new JType(desc), "access": access_flags };
+		this.fields[name] = { "type": new JType(desc), "access": access_flags };
 	}
 	
 	// Setup the default values of all the fields on this instance by walking up the class chain and inserting
@@ -280,8 +268,8 @@ function KLClass(loadedClass, superclass) {
 	let currentClass = this;
 	while (currentClass) {
 		for (let fieldName in currentClass.fields) {
-			let fieldType = currentClass.fields[fieldName].jtype;
-			let fieldVal = DefaultObjectForJType(fieldType);
+			let fieldType = currentClass.fields[fieldName].type;
+			let fieldVal = DefaultValueForType(fieldType);
 			this.fieldValsByClass[currentClass.className][fieldName] = fieldVal;
 		}
 		currentClass = currentClass.superclass;
