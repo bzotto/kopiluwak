@@ -161,9 +161,18 @@ function KLThreadContext(bootstrapMethod) {
 		frame.pc = frame.pc + count;
 	}
 	
-	function U8FromInstruction(frame) {
+	function U8FromInstruction(frame, offset) {
+		if (offset == undefined) offset = 1;
 		let code = frame.method.code;
-		let byte = code[frame.pc + 1];
+		let byte = code[frame.pc + offset];
+		return byte;
+	}
+	
+	function S8FromInstruction(frame, offset) {
+		if (offset == undefined) offset = 1;
+		let code = frame.method.code;
+		let byte = code[frame.pc + offset];
+		if (byte > 127) { byte -= 256; }
 		return byte;
 	}
 	
@@ -233,7 +242,9 @@ function KLThreadContext(bootstrapMethod) {
 					let strclass = ResolveClass("java.lang.String");
 					let strobj = strclass.createInstance();
 					let arrobj = new JArray(new JType(JTYPE_INT), strbytes.length);
-					arrobj.elements = strbytes;
+					for (let i = 0; i < strbytes.length; i++) {
+						arrobj.elements[i] = new JInt(strbytes[i]);
+					}
 					// Rig the current frame and the child completion to land on the next instruction with the 
 					// stack looking right.
 					let initMethod = ResolveMethodReference({"className": "java.lang.String", "methodName": "<init>", "descriptor": "([III)V"});
@@ -661,5 +672,97 @@ function KLThreadContext(bootstrapMethod) {
 		let offset = S16FromInstruction(frame);
 		IncrementPC(frame, offset);
 	}
+		
+	const instr_xstore = function(frame, opcode) {
+		let index = U8FromInstruction(frame);
+		let valueOrObjectRef = frame.operandStack.pop();
+		if ((opcode == INSTR_istore && !valueOrObjectRef.isa.isInt()) || 
+		    (opcode == INSTR_lstore && !valueOrObjectRef.isa.isLong()) ||
+			(opcode == INSTR_fstore && !valueOrObjectRef.isa.isFloat()) ||
+			(opcode == INSTR_dstore && !valueOrObjectRef.isa.isDouble()) ||
+			(opcode == INSTR_astore && !(valueOrObjectRef.isa.isReferenceType() || valueOrObjectRef.isa.isReturnAddress()))) {
+				debugger;
+		}
+		
+		frame.localVariables[index] = valueOrObjectRef;
+		if (opcode == INSTR_lstore || opcode == INSTR_dstore) {
+			frame.localVariables[index+1] = valueOrObjectRef;
+		}
+		IncrementPC(frame, 2);
+	}
+	this.instructionHandlers[INSTR_istore] = instr_xstore;
+	this.instructionHandlers[INSTR_lstore] = instr_xstore;
+	this.instructionHandlers[INSTR_fstore] = instr_xstore;
+	this.instructionHandlers[INSTR_dstore] = instr_xstore;
+	this.instructionHandlers[INSTR_astore] = instr_xstore;
+		
+	const instr_xload = function(frame, opcode) {
+		let index = U8FromInstruction(frame);
+		let valueOrObjectRef = frame.localVariables[index];
+		if ((opcode == INSTR_iload && !valueOrObjectRef.isa.isInt()) || 
+		    (opcode == INSTR_lload && !valueOrObjectRef.isa.isLong()) ||
+			(opcode == INSTR_fload && !valueOrObjectRef.isa.isFloat()) ||
+			(opcode == INSTR_dload && !valueOrObjectRef.isa.isDouble()) ||
+			(opcode == INSTR_aload && !valueOrObjectRef.isa.isReferenceType())) {
+				debugger;
+		}
+		frame.operandStack.push(valueOrObjectRef);
+		IncrementPC(frame, 2);
+	}
+	this.instructionHandlers[INSTR_iload] = instr_xload;
+	this.instructionHandlers[INSTR_lload] = instr_xload;
+	this.instructionHandlers[INSTR_fload] = instr_xload;
+	this.instructionHandlers[INSTR_dload] = instr_xload;
+	this.instructionHandlers[INSTR_aload] = instr_xload;
 	
+	this.instructionHandlers[INSTR_iinc] = function(frame) {
+		let index = U8FromInstruction(frame, 1);
+		let cnst = S8FromInstruction(frame, 2);
+		let value = frame.localVariables[index];
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		let intVal = value.val + cnst;
+		frame.localVariables[index] = new JInt(intVal);
+		IncrementPC(frame, 3);
+	}
+	
+	const instr_ixload = function(frame, opcode, thread) {
+		let index = frame.operandStack.pop();
+		let arrayref = frame.operandStack.pop();
+		// Static and dynamic type checks, ordered so they can each be effective in turn. 
+		if (arrayref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return;
+		}
+		if (!index.isa.isInt() || !arrayref.isa.isArray()) {
+			debugger;
+		}
+		if ((opcode == INSTR_iaload && !arrayref.containsType.isInt()) ||
+			(opcode == INSTR_laload && !arrayref.containsType.isLong()) ||
+			(opcode == INSTR_faload && !arrayref.containsType.isFloat()) ||
+			(opcode == INSTR_daload && !arrayref.containsType.isDouble()) ||
+			(opcode == INSTR_aaload && !arrayref.containsType.isReferenceType()) ||
+			(opcode == INSTR_baload && !(arrayref.containsType.isByte() || arrayref.containsType.isBoolean())) ||
+			(opcode == INSTR_caload && !arrayref.containsType.isChar()) ||
+			(opcode == INSTR_saload && !arrayref.containsType.isShort())) {
+			debugger;
+		}
+		let indexVal = index.val;
+		if (indexVal < 0 || indexVal >= arrayref.count) {
+			thread.throwException("java.lang.ArrayIndexOutOfBoundsException");
+			return;
+		}
+		let valueOrObjectRef = arrayref.elements[indexVal];
+		frame.operandStack.push(valueOrObjectRef);
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_iaload] = instr_ixload;
+	this.instructionHandlers[INSTR_laload] = instr_ixload;
+	this.instructionHandlers[INSTR_faload] = instr_ixload;
+	this.instructionHandlers[INSTR_daload] = instr_ixload;
+	this.instructionHandlers[INSTR_aaload] = instr_ixload;
+	this.instructionHandlers[INSTR_baload] = instr_ixload;
+	this.instructionHandlers[INSTR_caload] = instr_ixload;
+	this.instructionHandlers[INSTR_saload] = instr_ixload;	
 }

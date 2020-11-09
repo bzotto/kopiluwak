@@ -38,11 +38,12 @@ function JObj(klclass) {
 
 function JArray(type, count) {
 	this.isa = new JType("[" + type.descriptorString());
+	this.containsType = type;
 	this.monitor = 0;
 	this.count = count;
 	this.elements = [];
 	
-	let defaultValue = DefaultValueForType(type);
+	let defaultValue = DefaultValueForType(this.containsType);
 	for (let i = 0; i < count; i++) {
 		this.elements[i] = defaultValue;
 	}
