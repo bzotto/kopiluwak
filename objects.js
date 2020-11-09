@@ -20,23 +20,31 @@ function JObj(klclass) {
 	
 	this.meta = {}; // storage for VM metadata. Useful for e.g. Java Class objects to tie back to what they reflect.
 	
-	// Set up the field val class buckets.
-	let curclass = klclass;
+	// Set up the field val class buckets and their default values.
+	let currentClass = klclass;
 	do {
-		this.fieldValsByClass[curclass.className] = {};
-		curclass = curclass.superclass;
- 	} while (curclass);
+		this.fieldValsByClass[currentClass.className] = {};
+		for (let fieldName in currentClass.fields) {
+			let fieldAccess = currentClass.fields[fieldName].access;
+			if ((fieldAccess & ACC_STATIC) == 0) {
+				let fieldType = currentClass.fields[fieldName].type;
+				let fieldVal = DefaultValueForType(fieldType);
+				this.fieldValsByClass[currentClass.className][fieldName] = fieldVal;
+			}
+		}
+		currentClass = currentClass.superclass;
+ 	} while (currentClass);
 }
 
 function JArray(type, count) {
 	this.isa = new JType("[" + type.descriptorString());
-	this.class = null;
-	this.atype = 0;
 	this.monitor = 0;
 	this.count = count;
 	this.elements = [];
+	
+	let defaultValue = DefaultValueForType(type);
 	for (let i = 0; i < count; i++) {
-		this.elements[i] = null;
+		this.elements[i] = defaultValue;
 	}
 }
 
@@ -75,11 +83,6 @@ function JDouble(val) {
 	this.val = (val != undefined) ? val : +0.0;
 }
 
-function JBoolean(val) {
-	this.isa = new JType(JTYPE_BOOLEAN);
-	this.val = (val != undefined) ? val : false;
-}
-
 function JReturnAddr(val) {
 	this.isa = new JType(JTYPE_RETURNADDR);
 	this.val = (val != undefined) ? val : 0; 
@@ -105,7 +108,8 @@ function DefaultValueForType(jtype) {
 	} else if (jtype.isDouble()) {
 		return new JDouble();
 	} else if (jtype.isBoolean()) {
-		return new JBoolean();
+		// Boolean types are encoded as int(0|1)
+		return new JInt();
 	} 
 	
 	alert("assert: DefaultValueForType can't work with JType: " + jtype.descriptorString());
@@ -268,14 +272,17 @@ function KLClass(loadedClass, superclass) {
 		this.fields[name] = { "type": new JType(desc), "access": access_flags };
 	}
 	
-	// Setup the default values of all the fields on this instance by walking up the class chain and inserting
+	// Setup the default values of all the fields on this class by walking up the class chain and inserting
 	// default objects for each field.
 	let currentClass = this;
 	while (currentClass) {
 		for (let fieldName in currentClass.fields) {
-			let fieldType = currentClass.fields[fieldName].type;
-			let fieldVal = DefaultValueForType(fieldType);
-			this.fieldValsByClass[currentClass.className][fieldName] = fieldVal;
+			let fieldAccess = currentClass.fields[fieldName].access;
+			if ((fieldAccess & ACC_STATIC) != 0) {
+				let fieldType = currentClass.fields[fieldName].type;
+				let fieldVal = DefaultValueForType(fieldType);
+				this.fieldValsByClass[currentClass.className][fieldName] = fieldVal;
+			}
 		}
 		currentClass = currentClass.superclass;
 	}

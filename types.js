@@ -158,7 +158,12 @@ function JType(typeOrDescriptor) {
 			return null;
 		}
 	}
-	
+		 
+	this.isExactlyEqualTo = function(other) {
+		return this.type == other.type && this.name == other.name && 
+			this.dimensions == other.dimensions && this.componentType == other.componentType;
+	}
+		 
 	//
 	// Construction
 	//	
@@ -218,6 +223,30 @@ function JType(typeOrDescriptor) {
 	}
 }
 
+function JTypeFromJVMArrayType(atype) {
+	switch (atype) {
+	case T_BOOLEAN:
+		return new JType(JTYPE_BOOLEAN);
+	case T_CHAR:
+		return new JType(JTYPE_CHAR);
+	case T_FLOAT:
+		return new JType(JTYPE_FLOAT);
+	case T_DOUBLE:
+		return new JTyoe(JTYPE_DOUBLE);
+	case T_BYTE:
+		return new JType(JTYPE_BYTE);
+	case T_SHORT:
+		return new JType(JTYPE_SHORT);
+	case T_INT:
+		return new JType(JTYPE_INT);
+	case T_LONG:
+		return new JType(JTYPE_LONG);
+	default:
+		debugger;
+		return new JType(JTYPE_INT);
+	}
+}
+
 //
 // Parses and describes a method argument and return types with instances of type objects.
 // 
@@ -230,7 +259,7 @@ function KLMethodDescriptor(descriptorString) {
 	}
 	
 	this.descriptor = (' ' + descriptorString).slice(1);
-	this.parameterTypes = [];
+	this.argumentTypes = [];
 	this.return = null;
 	
 	//
@@ -240,11 +269,11 @@ function KLMethodDescriptor(descriptorString) {
 	this.descriptorString = function() {
 		return this.descriptor;
 	}
-	this.parameterCount = function() {
-		return this.parameterTypes.length;
+	this.argumentCount = function() {
+		return this.argumentTypes.length;
 	}
-	this.parameterTypeAtIndex = function(index) {
-		return this.parameterTypes[index];
+	this.argumentTypeAtIndex = function(index) {
+		return this.argumentTypes[index];
 	}
 	this.returnsVoid = function() {
 		return this.return == null;
@@ -272,9 +301,9 @@ function KLMethodDescriptor(descriptorString) {
 		}
 		end += 1;
 		
-		let thisParamDesc = descriptorString.substring(start, end);
-		let thisParamType = new JType(thisParamDesc);
-		this.parameterTypes.push(thisParamType);
+		let thisArgDesc = descriptorString.substring(start, end);
+		let thisArgType = new JType(thisArgDesc);
+		this.argumentTypes.push(thisArgType);
 		idx = end;
 	}
 	// Everything from here to the end of the method desc is the return type.

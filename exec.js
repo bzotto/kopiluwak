@@ -17,11 +17,6 @@ function KLThreadContext(bootstrapMethod) {
 
 	this.stack = [];
 	
-	if (bootstrapMethod) {
-		let baseFrame = new KLStackFrame(bootstrapMethod);
-		this.stack.push(baseFrame);
-	}
-		
 	this.pushFrame = function(frame) {
 		this.stack.unshift(frame);
 	}
@@ -36,6 +31,17 @@ function KLThreadContext(bootstrapMethod) {
 		}
 		console.log("--> Exiting " + outgoingFrame.method.class.className + "." + outgoingFrame.method.name);
 		return outgoingFrame;
+	}
+	
+	this.throwException = function(exceptionClassName) {
+		let npeClass = ResolveClass(exceptionClassName);
+		let e = npeClass.createInstance();
+		this.stack[0].pendingException = e; // Not initialized yet but will be when we unwind back to it!
+		let initFrame = CreateObjInitFrameIfNeeded(e);
+		initFrame.completionHandlers.push(function() { 
+			jobj.state = JOBJ_STATE_INITIALIZED;
+		});
+		this.pushFrame(initFrame);
 	}
 	
 	this.currentFQMethodName = function() {
@@ -105,7 +111,7 @@ function KLThreadContext(bootstrapMethod) {
 					} else {				
 						console.log("JVM: Eliding native method " + frame.method.class.className + "." + frame.method.name + " (desc: " + frame.method.descriptor.descriptorString() + ")");
 						let nativeFrame = this.popFrame();
-						if (!frame.method.descriptor.returnsVoid()) {
+						if (!nativeFrame.method.descriptor.returnsVoid()) {
 							let returnType = nativeFrame.method.descriptor.returnType();
 							let defaultVal = DefaultValueForType(returnType);
 							this.stack[0].operandStack.push(defaultVal);
@@ -134,6 +140,18 @@ function KLThreadContext(bootstrapMethod) {
 		}
 	}
 	
+	//
+	// Construction
+	// 
+	
+	if (bootstrapMethod) {
+		let baseFrame = new KLStackFrame(bootstrapMethod);
+		this.stack.push(baseFrame);
+	}
+	
+	//
+	// INSTRUCTION HANDLING
+	//
 	
 	//
 	// Exec helper snippets for instruction handling.
@@ -165,7 +183,7 @@ function KLThreadContext(bootstrapMethod) {
 		let s16 = sign ? (0xFFFF0000 | x) : x;
 		return s16;
 	}
-		
+				
 	//
 	// Map of opcode values to handler functions. Each handler function takes a thread context,
 	// in which the active frame has a pc pointing to the beginning of the relevant instruction
@@ -178,7 +196,7 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	};
 	
-	const handler_ldc = function(frame, opcode, thread) {
+	const instr_ldc = function(frame, opcode, thread) {
 		let instlen = ((opcode == INSTR_ldc) ? 2 : 3);
 		let index;
 		if (opcode == INSTR_ldc) {
@@ -219,11 +237,11 @@ function KLThreadContext(bootstrapMethod) {
 					// Rig the current frame and the child completion to land on the next instruction with the 
 					// stack looking right.
 					let initMethod = ResolveMethodReference({"className": "java.lang.String", "methodName": "<init>", "descriptor": "([III)V"});
-					let initFrame = CreateStackFrame(initMethod);
+					let initFrame = new KLStackFrame(initMethod);
 					initFrame.localVariables.push(strobj);
 					initFrame.localVariables.push(arrobj);
-					initFrame.localVariables.push(0);
-					initFrame.localVariables.push(arrobj.count);
+					initFrame.localVariables.push(new JInt(0));
+					initFrame.localVariables.push(new JInt(arrobj.count));
 					initFrame.completionHandlers.push(function() { 
 						strobj.state = JOBJ_STATE_INITIALIZED;
 					});
@@ -240,8 +258,8 @@ function KLThreadContext(bootstrapMethod) {
 			IncrementPC(frame, instlen);
 		}
 	};
-	this.instructionHandlers[INSTR_ldc] = handler_ldc;
-	this.instructionHandlers[INSTR_ldc_w] = handler_ldc;
+	this.instructionHandlers[INSTR_ldc] = instr_ldc;
+	this.instructionHandlers[INSTR_ldc_w] = instr_ldc;
 	
 	this.instructionHandlers[INSTR_getstatic] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
@@ -274,28 +292,374 @@ function KLThreadContext(bootstrapMethod) {
 		}
 	}
 	
-	const handler_iconst_n = function(frame, opcode) {
-		let val = opcode - INSTR_iconst_0;
-		frame.operandStack.push(new JInt(val));
+	this.instructionHandlers[INSTR_getfield] = function(frame) {
+		let index = U16FromInstruction(frame);
+		let fieldRef = frame.method.class.fieldReferenceFromIndex(index);
+		let field = ResolveFieldReference(fieldRef);
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType()) {
+			debugger;
+		}
+		let value = objectref.fieldValsByClass[fieldRef.className][fieldRef.fieldName];
+		frame.operandStack.push(value);
+		IncrementPC(frame, 3);
+	}
+	
+	this.instructionHandlers[INSTR_putfield] = function(frame, opcode, thread) {
+		let index = U16FromInstruction(frame);
+		let fieldRef = frame.method.class.fieldReferenceFromIndex(index);
+		let field = ResolveFieldReference(fieldRef);
+		if ((field.access & ACC_STATIC) != 0) {
+			thread.throwException("java.lang.IncompatibleClassChangeError");
+			return;
+		}
+		if ((field.access & ACC_FINAL) != 0) {
+			if (fieldRef.className != frame.method.class.className || 
+				method.name != "<init>") {
+				thread.throwException("java.lang.IllegalAccessError");
+			}
+		}
+		let value = frame.operandStack.pop();  
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType()) {
+			debugger;
+		}
+		if (objectref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return;
+		}
+		if (!TypeIsAssignableToType(objectref.isa, field.type)) {
+			debugger;
+		}
+		
+		objectref.fieldValsByClass[fieldRef.className][fieldRef.fieldName] = objectref;
+		IncrementPC(frame, 3);
+	}
+	
+	const instr_iconst_n = function(frame, opcode) {
+		let i = opcode - INSTR_iconst_0;
+		frame.operandStack.push(new JInt(i));
 		IncrementPC(frame, 1);
 	}
-	this.instructionHandlers[INSTR_iconst_m1] = handler_iconst_n;
-	this.instructionHandlers[INSTR_iconst_0] = handler_iconst_n;
-	this.instructionHandlers[INSTR_iconst_1] = handler_iconst_n;
-	this.instructionHandlers[INSTR_iconst_2] = handler_iconst_n;
-	this.instructionHandlers[INSTR_iconst_3] = handler_iconst_n;
-	this.instructionHandlers[INSTR_iconst_4] = handler_iconst_n;
-	this.instructionHandlers[INSTR_iconst_5] = handler_iconst_n;
+	this.instructionHandlers[INSTR_iconst_m1] = instr_iconst_n;
+	this.instructionHandlers[INSTR_iconst_0] = instr_iconst_n;
+	this.instructionHandlers[INSTR_iconst_1] = instr_iconst_n;
+	this.instructionHandlers[INSTR_iconst_2] = instr_iconst_n;
+	this.instructionHandlers[INSTR_iconst_3] = instr_iconst_n;
+	this.instructionHandlers[INSTR_iconst_4] = instr_iconst_n;
+	this.instructionHandlers[INSTR_iconst_5] = instr_iconst_n;
 	
-	this.instructionHandlers[INSTR_anewarray] = function(frame) {
+	this.instructionHandlers[INSTR_anewarray] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
 		let constref = frame.method.class.constantPool[index];
 		let className = frame.method.class.classNameFromUtf8Constant(constref.name_index);
 		let arrayClass = ResolveClass(className);
-		let count = frame.operandStack.pop().val;
-		let newarray = new JArray(arrayClass.typeOfInstances, count);
+		let count = frame.operandStack.pop();
+		if (!count.isa.isInt()) {
+			debugger;
+		}
+		if (count < 0) {
+			thread.throwException("NegativeArraySizeException");
+			return;
+		}
+		let newarray = new JArray(arrayClass.typeOfInstances, count.val);
 		frame.operandStack.push(newarray);
 		IncrementPC(frame, 3);
+	}
+	
+	this.instructionHandlers[INSTR_newarray] = function(frame, opcode, thread) {
+		let count = frame.operandStack.pop();
+		if (!count.isa.isInt()) {
+			debugger;
+		}
+		if (count < 0) {
+			thread.throwException("NegativeArraySizeException");
+			return;
+		}
+		let atype = U8FromInstruction(frame);
+		if (atype < 4 || atype > 11) {
+			debugger;
+		}
+		let jtype = JTypeFromJVMArrayType(atype);
+		let arrayref = new JArray(jtype, count);
+		frame.operandStack.push(arrayref);
+		IncrementPC(frame, 2);
+	}
+	
+	this.instructionHandlers[INSTR_new] = function(frame) {
+		let index = U16FromInstruction(frame);
+		let constref = frame.method.class.constantPool[index];
+		let className = frame.method.class.classNameFromUtf8Constant(constref.name_index);
+		let klclass = ResolveClass(className);
+		let jObj = klclass.createInstance();
+		frame.operandStack.push(jObj);
+		IncrementPC(frame, 3);
+	}
+	
+	this.instructionHandlers[INSTR_dup] = function(frame) {
+		let value = frame.operandStack.pop();
+		frame.operandStack.push(value);
+		frame.operandStack.push(value);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_invokestatic] = function(frame, opcode, thread) {
+		let index = U16FromInstruction(frame);
+		let methodRef = frame.method.class.methodReferenceFromIndex(index);
+		let method = ResolveMethodReference(methodRef, null);  // what's the right class param here?
+		let argsCount = method.descriptor.argumentCount();
+		let args = frame.operandStack.splice(argsCount * -1.0, argsCount);
+		let childFrame = new KLStackFrame(method);		
+		childFrame.localVariables = args;
+		IncrementPC(frame, 3);
+		thread.pushFrame(childFrame);
+	}
+	
+	const instr_invokevirtual = function(frame, opcode, thread) {
+		let index = U16FromInstruction(frame);
+		let methodRef = frame.method.class.methodReferenceFromIndex(index);
+		// Build descriptor so we know how many arguments there are.
+		let methodDesc = new KLMethodDescriptor(methodRef.descriptor);
+		let argsCount = methodDesc.argumentCount();
+		let args = frame.operandStack.splice(argsCount * -1.0, argsCount);
+		let jobj = frame.operandStack.pop();
+		args.unshift(jobj);
+		// If the method being requested is in a superclass of the *currently executing* method's class,
+		// then it represents an explicit or implicit call into a superclass, which means that we *don't*
+		// want to take overrides into account.
+		let contextClass = jobj.class;
+		if (IsClassASubclassOf(frame.method.class.className, methodRef.className)) {
+			contextClass = null;
+		}
+		let method = ResolveMethodReference(methodRef, contextClass);  
+		let childFrame = new KLStackFrame(method);		
+		childFrame.localVariables = args;
+		IncrementPC(frame, 3);
+		thread.pushFrame(childFrame);
+	}
+	this.instructionHandlers[INSTR_invokevirtual] = instr_invokevirtual;
+	this.instructionHandlers[INSTR_invokespecial] = instr_invokevirtual;
+	
+	const instr_aload_n = function(frame, opcode) {
+		let n = opcode - INSTR_aload_0;
+		let objectref = frame.localVariables[n];
+		if (!objectref.isa.isReferenceType()) {
+			// error. throw?
+			console.log("aload_n expected reference type");
+			debugger;
+		}
+		frame.operandStack.push(objectref);
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_aload_0] = instr_aload_n;
+	this.instructionHandlers[INSTR_aload_1] = instr_aload_n;
+	this.instructionHandlers[INSTR_aload_2] = instr_aload_n;
+	this.instructionHandlers[INSTR_aload_3] = instr_aload_n;
+	
+	this.instructionHandlers[INSTR_return] = function(frame, opcode, thread) {
+		if (!frame.method.descriptor.returnsVoid()) {
+			debugger;
+		}		
+		thread.popFrame();		
+	}
+	
+	this.instructionHandlers[INSTR_ireturn] = function(frame, opcode, thread) {
+		let returnType = frame.method.descriptor.returnType();
+		if (!returnType.isBoolean() && !returnType.isByte() && !returnType.isShort() && !returnType.isChar() && !returnType.isInt()) {
+			debugger;
+		}
+		let value = frame.operandStack.pop();
+		if (!TypeIsAssignableToType(value.isa, returnType)) {
+			debugger;
+		}
+		thread.popFrame();
+		thread.stack[0].operandStack.push(value);
+	}
+	
+	this.instructionHandlers[INSTR_areturn] = function(frame, opcode, thread) {
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType() || !TypeIsAssignableToType(objectref.isa, frame.method.descriptor.returnType())) {
+			debugger;
+		}
+		thread.popFrame();
+		thread.stack[0].operandStack.push(objectref);
+	}
+	
+	const instr_iload_n = function(frame, opcode) {
+		let n = opcode - INSTR_iload_0;
+		let value = frame.localVariables[n];
+		if (!value.isa.isInt()) {
+			// error. throw?
+			console.log("iload_n expected int type");
+			debugger;
+		}
+		frame.operandStack.push(value);
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_iload_0] = instr_iload_n;
+	this.instructionHandlers[INSTR_iload_1] = instr_iload_n;
+	this.instructionHandlers[INSTR_iload_2] = instr_iload_n;
+	this.instructionHandlers[INSTR_iload_3] = instr_iload_n;
+	
+	let threw = false;
+	
+	this.instructionHandlers[INSTR_arraylength] = function(frame, opcode, thread) {
+		let arrayref = frame.operandStack.pop();
+		// if (!threw || arrayref.isa.isNull()) {
+		// 	threw = true;
+		// 	thread.throwException("java.lang.NullPointerException");
+		// 	return;
+		//
+		// 	// XXX throw NullPointerException
+		// 	debugger;
+		// }
+		if (!arrayref.isa.isArray()) {
+			// error should be understood statically. throw?
+			debugger;
+		}
+		let length = new JInt(arrayref.count);
+		frame.operandStack.push(length);
+		IncrementPC(frame, 1);
+	}
+	
+	const instr_if_cond = function(frame, opcode) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		let doBranch = false;
+		let intVal = value.val;
+		switch (opcode) {
+		case INSTR_ifeq: 
+			doBranch = (intVal == 0);
+			break;
+		case INSTR_ifne:
+			doBranch = (intVal != 0);
+			break;
+		case INSTR_iflt:
+			doBranch = (intVal < 0);
+			break;
+		case INSTR_ifge:
+			doBranch = (intVal >= 0);
+			break;
+		case INSTR_ifgt:
+			doBranch = (intVal > 0);
+			break;
+		case INSTR_ifle:
+			doBranch = (intVal <= 0);
+			break;
+		}
+		if (doBranch) {
+			let offset = S16FromInstruction(frame);
+			IncrementPC(frame, offset);
+		} else {
+			IncrementPC(frame, 3);
+		}
+	}
+	this.instructionHandlers[INSTR_ifeq] = instr_if_cond;
+	this.instructionHandlers[INSTR_ifne] = instr_if_cond;
+	this.instructionHandlers[INSTR_iflt] = instr_if_cond;
+	this.instructionHandlers[INSTR_ifge] = instr_if_cond;
+	this.instructionHandlers[INSTR_ifgt] = instr_if_cond;
+	this.instructionHandlers[INSTR_ifle] = instr_if_cond;
+	
+	const instr_if_icmp_cond = function(frame, opcode, thread) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}
+		let doBranch = false;
+		let intVal1 = value1.val;
+		let intVal2 = value2.val;
+		switch (opcode) {
+		case INSTR_if_icmpeq:
+			doBranch = (intVal1 == intVal2);
+			break;
+		case INSTR_if_icmpne:
+			doBranch = (intVal1 != intVal2);
+			break;
+		case INSTR_if_icmplt:
+			doBranch = (intVal1 < intVal2);
+			break;
+		case INSTR_if_icmpge:
+			doBranch = (intVal1 >= intVal2);
+			break;
+		case INSTR_if_icmpgt:
+			doBranch = (intVal1 > intVal2);
+			break;
+		case INSTR_if_icmple:
+			doBranch = (intVal1 <= intVal2);
+			break;
+		}
+		if (doBranch) {
+			let offset = S16FromInstruction(frame);
+			IncrementPC(frame, offset);
+		} else {
+			IncrementPC(frame, 3);
+		}
+	}
+	this.instructionHandlers[INSTR_if_icmpeq] = instr_if_icmp_cond;
+	this.instructionHandlers[INSTR_if_icmpne] = instr_if_icmp_cond;
+	this.instructionHandlers[INSTR_if_icmplt] = instr_if_icmp_cond;
+	this.instructionHandlers[INSTR_if_icmpge] = instr_if_icmp_cond;
+	this.instructionHandlers[INSTR_if_icmpgt] = instr_if_icmp_cond;
+	this.instructionHandlers[INSTR_if_icmple] = instr_if_icmp_cond;
+	
+	this.instructionHandlers[INSTR_isub] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}
+		let result = new JInt(value1.val - value2.val);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	const instr_astore_n = function(frame, opcode) {
+		let n = opcode - INSTR_astore_0;
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType() && !objectref.isa.isReturnAddress()) {
+			debugger;
+		}
+		frame.localVariables[n] = objectref;
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_astore_0] = instr_astore_n;
+	this.instructionHandlers[INSTR_astore_1] = instr_astore_n;
+	this.instructionHandlers[INSTR_astore_2] = instr_astore_n;
+	this.instructionHandlers[INSTR_astore_3] = instr_astore_n;
+	
+	this.instructionHandlers[INSTR_ifnonnull] = function(frame) {
+		let offset = S16FromInstruction(frame);
+		let value = frame.operandStack.pop();
+		if (!value.isa.isReferenceType()) {
+			debugger;
+		}
+		if (!value.isa.isNull()) {
+			IncrementPC(frame, offset);
+		} else {
+			IncrementPC(frame, 3);
+		}
+	}
+	
+	this.instructionHandlers[INSTR_ifnull] = function(frame) {
+		let offset = S16FromInstruction(frame);
+		let value = frame.operandStack.pop();
+		if (!value.isa.isReferenceType()) {
+			debugger;
+		}
+		if (value.isa.isNull()) {
+			IncrementPC(frame, offset);
+		} else {
+			IncrementPC(frame, 3);
+		}
+	}
+	
+	this.instructionHandlers[INSTR_goto] = function(frame) {
+		let offset = S16FromInstruction(frame);
+		IncrementPC(frame, offset);
 	}
 	
 }

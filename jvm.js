@@ -225,6 +225,45 @@ function ObjectIsA(jobj, className) {
 	return false;
 }
 
+function TypeIsAssignableToType(origin, dest) {
+	
+	if (dest.isBoolean() || dest.isByte() || dest.isChar() || dest.isShort() || dest.isInt()) {
+		return origin.isInt();
+	} else if (dest.isFloat()) {
+		return origin.isFloat();
+	} else if (dest.isDouble()) {
+		return origin.isDouble();
+	} else if (dest.isLong()) {
+		return origin.isLong();
+	} else if (dest.isArray()) {
+		if (!origin.isArray()) {
+			return false;
+		}
+		if (origin.arrayDimensions() != dest.arrayDimensions()) {
+			return false;
+		}
+		return ValueIsAssignableToType(origin.arrayComponentType(), dest.arrayComponentType());
+	} else if (dest.isReferenceType() && origin.isNull()) {
+		// null is assignable to any reference destination.
+		return true;
+	} else if (dest.isInterface()) {
+		// XXX I think we want to verify that the origin is a class which implements the interface of the 
+		// destination, but interface support is currently missing from classes generally.
+		debugger;
+		return true;
+	} else if (dest.isClass()) {
+		if (!origin.isClass()) {
+			return false;
+		}
+		if (origin.className() == dest.className()) {
+			return true;
+		}
+		return IsClassASubclassOf(origin.className, dest.className);
+	} else {
+		return origin.isExactlyEqualTo(dest);
+	}
+}
+
 // >= 0 means a target was found. negative values mean there is no target for this exception
 function HandlerPcForException(klclass, currentPC, exceptionObj, exceptionTable) {
 	if (!exceptionTable) {
@@ -247,17 +286,6 @@ function HandlerPcForException(klclass, currentPC, exceptionObj, exceptionTable)
 		}
 	}
 	return -1;
-}
-
-function CreateStackFrame(method) {
-	let frame = {};
-	frame.method = method;
-	frame.pc = 0;
-	frame.localVariables = [];
-	frame.operandStack = [];
-	frame.pendingException = null;
-	frame.completionHandlers = [];
-	return frame;
 }
 
 function DebugBacktrace(threadContext) {	
@@ -310,7 +338,7 @@ function CreateClassInitFrameIfNeeded(klclass) {
 		klclass.state = KLCLASS_STATE_INITIALIZED;
 		return null;
 	}
-	return CreateStackFrame(clinitMethod);
+	return new KLStackFrame(clinitMethod);
 }
 
 function CreateObjInitFrameIfNeeded(jobj) {
@@ -326,7 +354,7 @@ function CreateObjInitFrameIfNeeded(jobj) {
 		jobj.state = JOBJ_STATE_INITIALIZED;
 		return null;
 	}
-	return CreateStackFrame(initMethod);
+	return new KLStackFrame(initMethod);
 }
 
 function PopVmStackFrame(threadContext, isNormal) {
