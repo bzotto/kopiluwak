@@ -159,9 +159,20 @@ function JType(typeOrDescriptor) {
 		}
 	}
 		 
-	this.isExactlyEqualTo = function(other) {
-		return this.type == other.type && this.name == other.name && 
-			this.dimensions == other.dimensions && this.componentType == other.componentType;
+	this.isIdenticalTo = function(other) {
+		if (other == null) {
+			return false;
+		}
+		if (this.type != other.type || this.name != other.name || this.dimensions != other.dimensions) {
+			return false;
+		}
+		if (!!this.componentType != !!other.componentType) {
+			return false;
+		}
+		if (this.componentType && !this.componentType.isIdenticalTo(other.componentType)) {
+			return false;
+		}
+		return true;
 	}
 		 
 	//

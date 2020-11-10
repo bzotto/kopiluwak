@@ -225,9 +225,15 @@ function ObjectIsA(jobj, className) {
 	return false;
 }
 
+// This is a kitchen sink function that is currently far from comprehensive. 
 function TypeIsAssignableToType(origin, dest) {
+	if (!dest || !origin) {
+		debugger;
+	}
 	
-	if (dest.isBoolean() || dest.isByte() || dest.isChar() || dest.isShort() || dest.isInt()) {
+	if (dest.isIdenticalTo(origin)) {
+		return true;
+	} else if (dest.isBoolean() || dest.isByte() || dest.isChar() || dest.isShort() || dest.isInt()) {
 		return origin.isInt();
 	} else if (dest.isFloat()) {
 		return origin.isFloat();
@@ -242,7 +248,7 @@ function TypeIsAssignableToType(origin, dest) {
 		if (origin.arrayDimensions() != dest.arrayDimensions()) {
 			return false;
 		}
-		return ValueIsAssignableToType(origin.arrayComponentType(), dest.arrayComponentType());
+		return TypeIsAssignableToType(origin.arrayComponentType(), dest.arrayComponentType());
 	} else if (dest.isReferenceType() && origin.isNull()) {
 		// null is assignable to any reference destination.
 		return true;
@@ -258,9 +264,9 @@ function TypeIsAssignableToType(origin, dest) {
 		if (origin.className() == dest.className()) {
 			return true;
 		}
-		return IsClassASubclassOf(origin.className, dest.className);
+		return IsClassASubclassOf(origin.className(), dest.className());
 	} else {
-		return origin.isExactlyEqualTo(dest);
+		return origin.isIdenticalTo(dest);
 	}
 }
 

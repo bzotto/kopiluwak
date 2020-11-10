@@ -339,7 +339,7 @@ function KLThreadContext(bootstrapMethod) {
 			thread.throwException("java.lang.NullPointerException");
 			return;
 		}
-		if (!TypeIsAssignableToType(objectref.isa, field.type)) {
+		if (!TypeIsAssignableToType(value.isa, field.field.type)) {
 			debugger;
 		}
 		
@@ -675,18 +675,18 @@ function KLThreadContext(bootstrapMethod) {
 		
 	const instr_xstore = function(frame, opcode) {
 		let index = U8FromInstruction(frame);
-		let valueOrObjectRef = frame.operandStack.pop();
-		if ((opcode == INSTR_istore && !valueOrObjectRef.isa.isInt()) || 
-		    (opcode == INSTR_lstore && !valueOrObjectRef.isa.isLong()) ||
-			(opcode == INSTR_fstore && !valueOrObjectRef.isa.isFloat()) ||
-			(opcode == INSTR_dstore && !valueOrObjectRef.isa.isDouble()) ||
-			(opcode == INSTR_astore && !(valueOrObjectRef.isa.isReferenceType() || valueOrObjectRef.isa.isReturnAddress()))) {
+		let valueOrObjectref = frame.operandStack.pop();
+		if ((opcode == INSTR_istore && !valueOrObjectref.isa.isInt()) || 
+		    (opcode == INSTR_lstore && !valueOrObjectref.isa.isLong()) ||
+			(opcode == INSTR_fstore && !valueOrObjectref.isa.isFloat()) ||
+			(opcode == INSTR_dstore && !valueOrObjectref.isa.isDouble()) ||
+			(opcode == INSTR_astore && !(valueOrObjectref.isa.isReferenceType() || valueOrObjectref.isa.isReturnAddress()))) {
 				debugger;
 		}
 		
-		frame.localVariables[index] = valueOrObjectRef;
+		frame.localVariables[index] = valueOrObjectref;
 		if (opcode == INSTR_lstore || opcode == INSTR_dstore) {
-			frame.localVariables[index+1] = valueOrObjectRef;
+			frame.localVariables[index+1] = valueOrObjectref;
 		}
 		IncrementPC(frame, 2);
 	}
@@ -698,15 +698,15 @@ function KLThreadContext(bootstrapMethod) {
 		
 	const instr_xload = function(frame, opcode) {
 		let index = U8FromInstruction(frame);
-		let valueOrObjectRef = frame.localVariables[index];
-		if ((opcode == INSTR_iload && !valueOrObjectRef.isa.isInt()) || 
-		    (opcode == INSTR_lload && !valueOrObjectRef.isa.isLong()) ||
-			(opcode == INSTR_fload && !valueOrObjectRef.isa.isFloat()) ||
-			(opcode == INSTR_dload && !valueOrObjectRef.isa.isDouble()) ||
-			(opcode == INSTR_aload && !valueOrObjectRef.isa.isReferenceType())) {
+		let valueOrObjectref = frame.localVariables[index];
+		if ((opcode == INSTR_iload && !valueOrObjectref.isa.isInt()) || 
+		    (opcode == INSTR_lload && !valueOrObjectref.isa.isLong()) ||
+			(opcode == INSTR_fload && !valueOrObjectref.isa.isFloat()) ||
+			(opcode == INSTR_dload && !valueOrObjectref.isa.isDouble()) ||
+			(opcode == INSTR_aload && !valueOrObjectref.isa.isReferenceType())) {
 				debugger;
 		}
-		frame.operandStack.push(valueOrObjectRef);
+		frame.operandStack.push(valueOrObjectref);
 		IncrementPC(frame, 2);
 	}
 	this.instructionHandlers[INSTR_iload] = instr_xload;
@@ -753,8 +753,8 @@ function KLThreadContext(bootstrapMethod) {
 			thread.throwException("java.lang.ArrayIndexOutOfBoundsException");
 			return;
 		}
-		let valueOrObjectRef = arrayref.elements[indexVal];
-		frame.operandStack.push(valueOrObjectRef);
+		let valueOrObjectref = arrayref.elements[indexVal];
+		frame.operandStack.push(valueOrObjectref);
 		IncrementPC(frame, 1);
 	}
 	this.instructionHandlers[INSTR_iaload] = instr_ixload;
@@ -765,4 +765,94 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_baload] = instr_ixload;
 	this.instructionHandlers[INSTR_caload] = instr_ixload;
 	this.instructionHandlers[INSTR_saload] = instr_ixload;	
+	
+	this.instructionHandlers[INSTR_bipush] = function(frame) {
+		let byte = S8FromInstruction(frame);
+		let value = new JInt(byte);
+		frame.operandStack.push(value);
+		IncrementPC(frame, 2);
+	}
+	
+	this.instructionHandlers[INSTR_sipush] = function(frame) {
+		let short = S16FromInstruction(frame);
+		let value = new JInt(short);
+		frame.operandStack.push(value);
+		IncrementPC(frame, 3);
+	}	
+	
+	this.instructionHandlers[INSTR_iushr] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}
+		let intVal1 = value1.val;
+		let intVal2 = value2.val;
+		let s = intVal2 & 0x1F;
+		let intResult;
+		if (intVal1 > 0) {
+			intResult = intVal1 >> s;
+		} else {
+			intResult = (intVal1 >> s) + (2 << ~s);
+		}
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_i2b] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		let intResult = value.val & 0x000000FF;
+		if ((intResult & 0x00000080) > 0) {
+			// sign extend to int size
+			intResult = intResult | 0xFFFFFF00;
+		}
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	const instr_int_astore = function(frame, opcode, thread) {
+		let value = frame.operandStack.pop();
+		let index = frame.operandStack.pop();
+		let arrayref = frame.operandStack.pop();
+		if (arrayref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return;
+		}
+		if (!value.isa.isInt() || !index.isa.isInt() || !arrayref.isa.isArray()) {
+			debugger;
+		}
+		if ((opcode == INSTR_iastore && !arrayref.containsType.isInt()) ||
+			(opcode == INSTR_bastore && !(arrayref.containsType.isByte() || arrayref.containsType.isBoolean())) ||
+			(opcode == INSTR_castore && !arrayref.containsType.isChar()) ||
+			(opcode == INSTR_sastore && !arrayref.containsType.isShort())) {
+			debugger;
+		}
+		let indexVal = index.val;
+		if (indexVal < 0 || indexVal >= arrayref.count) {
+			thread.throwException("java.lang.ArrayIndexOutOfBoundsException");
+			return;
+		}
+		switch (opcode) {
+		case INSTR_iastore:
+			arrayref.elements[indexVal] = value;
+			break;
+		case INSTR_bastore:
+			arrayref.elements[indexVal] = new JInt(value.val & 0xFF);
+			break;
+		case INSTR_castore:
+		case INSTR_sastore:
+			arrayref.elements[indexVal] = new JInt(value.val & 0xFFFF);
+			break;
+		}
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_iastore] = instr_int_astore;
+	this.instructionHandlers[INSTR_bastore] = instr_int_astore;
+	this.instructionHandlers[INSTR_castore] = instr_int_astore;
+	this.instructionHandlers[INSTR_sastore] = instr_int_astore;
 }
