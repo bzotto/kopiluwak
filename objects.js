@@ -125,6 +125,7 @@ function KLClass(loadedClass, superclass) {
 	this.superclass = superclass;
 	this.className = loadedClass.className;
 	this.superclassName = loadedClass.superclassName;
+	this.accessFlags = loadedClass.accessFlags;
 	
 	this.state = KLCLASS_STATE_UNINITIALIZED;
 	this.monitor = 0;
@@ -138,6 +139,7 @@ function KLClass(loadedClass, superclass) {
 	
 	// Keep the constant pool and attributes around. We'll need them for runtime lookups.
 	this.constantPool = loadedClass.constantPool;
+	this.interfaces = loadedClass.interfaces;
 	this.attributes = loadedClass.attributes;
 		
 	this.typeOfInstances = new JType("L" + this.className + ";");
@@ -163,14 +165,24 @@ function KLClass(loadedClass, superclass) {
 		return name.replace(/\//g, ".");
 	}
 	
+	this.implementsInterface = function(interfaceName) {
+		for (let i in this.interfaces) {
+			if (this.interfaces[i] == interfaceName) {
+				return true;
+			}
+		}
+		return false;
+	}
+	
 	this.methodReferenceFromIndex = function(index) {
 		var methodInfo = this.constantPool[index];
+		let isInterface = methodInfo.tag == CONSTANT_InterfaceMethodref;
 		var classConstant = this.constantPool[methodInfo.class_index];
 		var className = this.classNameFromUtf8Constant(classConstant.name_index);
 		var nameAndType = this.constantPool[methodInfo.name_and_type_index];
 		var methodName = this.stringFromUtf8Constant(nameAndType.name_index);
 		var descriptor = this.descriptorFromUtf8Constant(nameAndType.descriptor_index);
-		return { "className": className, "methodName": methodName, "descriptor": descriptor };
+		return { "className": className, "methodName": methodName, "descriptor": descriptor, "isInterface": isInterface };
 	}
 	
 	this.fieldReferenceFromIndex = function(index) {

@@ -131,11 +131,33 @@ function IsClassASubclassOf(className1, className2) {
 	return false;
 }
 
+function DoesClassImplementInterface(className, interfaceName) {
+	let startClass = ResolveClass(className);
+	if (!startClass) {
+		//??
+		return false;
+	}
+	
+	
+	let targetClass = startClass;
+	while (targetClass) {
+		if (targetClass.implementsInterface(interfaceName)) {
+			return true;
+		}
+		targetClass = targetClass.superclass;
+	}
+	return false;
+}
+
 function ResolveMethodReference(methodRef, contextClass) {
 	// In general, we look for the method directly in the vtable of the contextClass, which is how overidden
 	// methods are implemented here, with each subclass getting a full vtable of its whole inheritance chain.
 
 	if (!contextClass) {
+		if (methodRef.isInterface) {
+			// ??
+			debugger;
+		}
 		contextClass = ResolveClass(methodRef.className);
 	}
 	
@@ -252,11 +274,6 @@ function TypeIsAssignableToType(origin, dest) {
 	} else if (dest.isReferenceType() && origin.isNull()) {
 		// null is assignable to any reference destination.
 		return true;
-	} else if (dest.isInterface()) {
-		// XXX I think we want to verify that the origin is a class which implements the interface of the 
-		// destination, but interface support is currently missing from classes generally.
-		debugger;
-		return true;
 	} else if (dest.isClass()) {
 		if (!origin.isClass()) {
 			return false;
@@ -264,7 +281,13 @@ function TypeIsAssignableToType(origin, dest) {
 		if (origin.className() == dest.className()) {
 			return true;
 		}
-		return IsClassASubclassOf(origin.className(), dest.className());
+		if (IsClassASubclassOf(origin.className(), dest.className())) {
+			return true;
+		}
+		if (DoesClassImplementInterface(origin.className(), dest.className())) {
+			return true;
+		}
+		return false;
 	} else {
 		return origin.isIdenticalTo(dest);
 	}
@@ -1574,7 +1597,7 @@ function KLClassFromLoadedClass(loadedClass) {
 function InjectOutputMockObjects() {
 		
 	// Stuff that lets us print stuff to the console.
-	var javaIoPrintStreamLoadedClass = new KLLoadedClass("java.io.PrintStream", "java.lang.Object", [], [], [], []);
+	var javaIoPrintStreamLoadedClass = new KLLoadedClass("java.io.PrintStream", "java.lang.Object", 0, [], [], [], [], []);
 	var javaIoPrintStreamJclass = new KLClass(javaIoPrintStreamLoadedClass);
 	javaIoPrintStreamJclass.vtable["println#(Ljava.lang.String;)V"] = { "name": "println", "class": javaIoPrintStreamJclass, "descriptor": new KLMethodDescriptor("(Ljava.lang.String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
 		function(jobj, x) {
@@ -1589,7 +1612,7 @@ function InjectOutputMockObjects() {
 	AddClass(javaIoPrintStreamJclass);
 	var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
 
-	var javaLangSystemLoadedClass = new KLLoadedClass("java.lang.System", "java.lang.Object", [], [], [], []);
+	var javaLangSystemLoadedClass = new KLLoadedClass("java.lang.System", "java.lang.Object", 0, [], [], [], [], []);
 	var javaLangSystemJclass = new KLClass(javaLangSystemLoadedClass);
 	javaLangSystemJclass.fields["out"] = { "type": new JType("Ljava.io.PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
 	javaLangSystemJclass.fieldValsByClass["java.lang.System"]["out"] = systemOutStreamObj;

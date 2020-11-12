@@ -38,8 +38,9 @@ function KLThreadContext(bootstrapMethod) {
 		let e = npeClass.createInstance();
 		this.stack[0].pendingException = e; // Not initialized yet but will be when we unwind back to it!
 		let initFrame = CreateObjInitFrameIfNeeded(e);
+		initFrame.localVariables[0] = e;
 		initFrame.completionHandlers.push(function() { 
-			jobj.state = JOBJ_STATE_INITIALIZED;
+			e.state = JOBJ_STATE_INITIALIZED;
 		});
 		this.pushFrame(initFrame);
 	}
@@ -69,14 +70,14 @@ function KLThreadContext(bootstrapMethod) {
 					// We can handle this one. Blow away the stack and jump to the handler.
 					pc = handlerPC;
 					frame.operandStack = [exception];
-				} else if (threadContext.stack.length > 1) {
+				} else if (this.stack.length > 1) {
 					// Nope. Kaboom.
 					this.popFrame(true);
 					this.stack[0].pendingException = exception;
 					continue;
 				} else {
 					// Nowhere left to throw... 
-					console.log("JVM: Java thread terminated due to unhandled exception " + exception.className);
+					console.log("JVM: Java thread terminated due to unhandled exception " + exception.class.className);
 					return; 
 				}
 				
@@ -98,7 +99,7 @@ function KLThreadContext(bootstrapMethod) {
 				
 				// If this is a native method, either execute it or if not present, pretend it executed and returned
 				// some default value. 
-				if ((frame.method.access & ACC_NATIVE) != 0) {
+				if ((frame.method.access & ACC_NATIVE) != 0 || code == null) { // XXX the code==null condition just helps us with mock objects
 					// Check if this is a native method we don't support. If so, log it and return a default value.
 					if (frame.method.impl) {
 						// Execute the native method impl if present.
@@ -119,6 +120,10 @@ function KLThreadContext(bootstrapMethod) {
 					} 
 					continue;
 				}	
+			}
+			
+			if (!code) {
+				debugger;
 			}
 			
 			// Verify that the pc is valid. 
@@ -512,18 +517,12 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_iload_2] = instr_iload_n;
 	this.instructionHandlers[INSTR_iload_3] = instr_iload_n;
 	
-	let threw = false;
-	
 	this.instructionHandlers[INSTR_arraylength] = function(frame, opcode, thread) {
 		let arrayref = frame.operandStack.pop();
-		// if (!threw || arrayref.isa.isNull()) {
-		// 	threw = true;
-		// 	thread.throwException("java.lang.NullPointerException");
-		// 	return;
-		//
-		// 	// XXX throw NullPointerException
-		// 	debugger;
-		// }
+		if (arrayref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return;
+		}
 		if (!arrayref.isa.isArray()) {
 			// error should be understood statically. throw?
 			debugger;
@@ -855,4 +854,23 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_bastore] = instr_int_astore;
 	this.instructionHandlers[INSTR_castore] = instr_int_astore;
 	this.instructionHandlers[INSTR_sastore] = instr_int_astore;
+	
+	this.instructionHandlers[INSTR_pop] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isCategory1ComputationalType()) {
+			debugger;
+		}
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_pop2] = function(frame) {
+		let value1 = frame.operandStack.pop();
+		if (value1.isa.isCategory1ComputationalType()) {
+			let value2 = frame.operandStack.pop();
+		} else {
+			// nothing
+		}
+		IncrementPC(frame, 1);
+	}
+	
 }

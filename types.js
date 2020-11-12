@@ -120,6 +120,12 @@ function JType(typeOrDescriptor) {
 	this.isReturnAddress = function() {
 		return this.type == JTYPE_RETURNADDR;
 	}
+	this.isCategory1ComputationalType = function() {
+		return !this.isCategory2ComputationalType();  // ;-)
+	}
+	this.isCategory2ComputationalType = function() {
+		return (this.type == JTYPE_LONG || this.type == JTYPE_DOUBLE);
+	}
 	this.descriptorString = function() {
 		switch (this.type) {
 		case JTYPE_CLASS:

@@ -6,10 +6,12 @@
 // Requires: constants, objects 
 //
 
-function KLLoadedClass(className, superclassName, constantPool, fields, methods, attributes) {
+function KLLoadedClass(className, superclassName, accessFlags, constantPool, interfaces, fields, methods, attributes) {
 	this.className = className;
 	this.superclassName = superclassName;
+	this.accessFlags = accessFlags;
 	this.constantPool = constantPool;
+	this.interfaces = interfaces;
 	this.fields = fields;
 	this.methods = methods;
 	this.attributes = attributes;
@@ -291,7 +293,8 @@ function KLClassLoader(classFileHexStringOrBytes) {
 			if (interfaceCpEntry.tag != CONSTANT_Class) {
 				return { "error": "Interface index doesn't point to a class info constant" };
 			}
-			interfaces.push(interfaceCpEntry);
+			let interfaceName = stringFromUtf8Constant(interfaceCpEntry.name_index).replace(/\//g, ".");
+			interfaces.push(interfaceName);
 		}
 		
 		let fieldsCount = readU2();
@@ -328,9 +331,7 @@ function KLClassLoader(classFileHexStringOrBytes) {
 		let className = stringFromUtf8Constant(ConstantPool[thisClass].name_index).replace(/\//g, ".");
 		let superClassName = superClass == 0 ? null : stringFromUtf8Constant(ConstantPool[superClass].name_index).replace(/\//g, ".");
 
-		// XXX: we parsed interfaces and access flags but aren't yet using them here.
-		
-		let loadedClass = new KLLoadedClass(className, superClassName, ConstantPool, fields, methods, attributes);
+		let loadedClass = new KLLoadedClass(className, superClassName, accessFlags, ConstantPool, interfaces, fields, methods, attributes);
 		return { "loadedClass": loadedClass };
 	};
 	
