@@ -348,7 +348,7 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		
-		objectref.fieldValsByClass[fieldRef.className][fieldRef.fieldName] = objectref;
+		objectref.fieldValsByClass[fieldRef.className][fieldRef.fieldName] = value;
 		IncrementPC(frame, 3);
 	}
 	

@@ -86,14 +86,29 @@ function ResolveClass(className) {
 function JavaLangStringObjForJSString(jsStr) {
 	let bytes = [];
     for (let i = 0; i < jsStr.length; i++) {
-        bytes.push(jsStr.charCodeAt(i));
+		let intobj = new JInt(jsStr.charCodeAt(i));
+        bytes.push(intobj);
     }
+	let byteArray = new JArray(new JType("B"), bytes.length);
+	byteArray.elements = bytes;
 	let stringClass = ResolveClass("java.lang.String");
 	stringObj = stringClass.createInstance();
-	stringObj.fieldValsByClass["java.lang.String"]["value"] = bytes;
+	stringObj.fieldValsByClass["java.lang.String"]["value"] = byteArray;
 	stringObj.fieldValsByClass["java.lang.String"]["coder"] = 0;  // ???
 	stringObj.state = JOBJ_STATE_INITIALIZED;
 	return stringObj;
+}
+
+function JSStringFromJavaLangStringObj(jobj) {
+	if (jobj.class.className != "java.lang.String") {
+		debugger;
+	}
+	let arrayref = jobj.fieldValsByClass["java.lang.String"]["value"];
+	let jsstring = "";
+	for (let i = 0; i < arrayref.elements.length; i++) {
+		jsstring += String.fromCharCode(arrayref.elements[i].val);
+	}
+	return jsstring;
 }
 
 function JavaLangClassObjForClass(klclass) {
@@ -1601,12 +1616,12 @@ function InjectOutputMockObjects() {
 	var javaIoPrintStreamJclass = new KLClass(javaIoPrintStreamLoadedClass);
 	javaIoPrintStreamJclass.vtable["println#(Ljava.lang.String;)V"] = { "name": "println", "class": javaIoPrintStreamJclass, "descriptor": new KLMethodDescriptor("(Ljava.lang.String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
 		function(jobj, x) {
-			console.log(x);
+			console.log(JSStringFromJavaLangStringObj(x));
 		}
 	};
 	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "class": javaIoPrintStreamJclass, "descriptor": new KLMethodDescriptor("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
 		function(jobj, x) {
-			console.log(x);
+			console.log(x.val);
 		}
 	};
 	AddClass(javaIoPrintStreamJclass);
