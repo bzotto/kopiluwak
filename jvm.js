@@ -89,12 +89,12 @@ function JavaLangStringObjForJSString(jsStr) {
 		let intobj = new JInt(jsStr.charCodeAt(i));
         bytes.push(intobj);
     }
-	let byteArray = new JArray(new JType("B"), bytes.length);
+	let byteArray = new JArray(new JType(JTYPE_BYTE), bytes.length);
 	byteArray.elements = bytes;
 	let stringClass = ResolveClass("java.lang.String");
 	stringObj = stringClass.createInstance();
 	stringObj.fieldValsByClass["java.lang.String"]["value"] = byteArray;
-	stringObj.fieldValsByClass["java.lang.String"]["coder"] = 0;  // ???
+	stringObj.fieldValsByClass["java.lang.String"]["coder"] = new JInt(1);  // = UTF16
 	stringObj.state = JOBJ_STATE_INITIALIZED;
 	return stringObj;
 }
@@ -278,6 +278,9 @@ function TypeIsAssignableToType(origin, dest) {
 		return origin.isDouble();
 	} else if (dest.isLong()) {
 		return origin.isLong();
+	} else if (dest.isReferenceType() && origin.isNull()) {
+		// null is assignable to any reference destination.
+		return true;
 	} else if (dest.isArray()) {
 		if (!origin.isArray()) {
 			return false;
@@ -286,9 +289,6 @@ function TypeIsAssignableToType(origin, dest) {
 			return false;
 		}
 		return TypeIsAssignableToType(origin.arrayComponentType(), dest.arrayComponentType());
-	} else if (dest.isReferenceType() && origin.isNull()) {
-		// null is assignable to any reference destination.
-		return true;
 	} else if (dest.isClass()) {
 		if (!origin.isClass()) {
 			return false;
@@ -580,7 +580,7 @@ function RunJavaThreadWithMethod(startupMethod) {
 			
 			let opcode = code[pc];
 			let nextPc;
-		
+					
 			switch (opcode) {
 			case 0x01: // aconst_null
 				{
@@ -1637,14 +1637,14 @@ function InjectOutputMockObjects() {
 function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	
 	// Inject system crap so we don't need JDK for super simple tests
-	InjectOutputMockObjects();
+	// InjectOutputMockObjects();
 	
 	//Create the VM startup thread.
-	// let initPhase1Method = ResolveMethodReference({"className": "java/lang/System", "methodName": "initPhase1", "descriptor": "()V"});
-	// if (initPhase1Method) {
-	// 	let ctx = new KLThreadContext(initPhase1Method);
-	// 	ctx.exec();
-	// }
+	let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
+	if (initPhase1Method) {
+		let ctx = new KLThreadContext(initPhase1Method);
+		ctx.exec();
+	}
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();

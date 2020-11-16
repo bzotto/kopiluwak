@@ -75,8 +75,9 @@ function JChar(val) {
 }
 
 function JFloat(val) {
-	this.isa = new JType(JTYPE_FlOAT);
+	this.isa = new JType(JTYPE_FLOAT);
 	this.val = (val != undefined) ? val : +0.0;
+	this.isNaN = function() { return isNaN(this.val); }
 }
 
 function JDouble(val) {
@@ -88,6 +89,9 @@ function JReturnAddr(val) {
 	this.isa = new JType(JTYPE_RETURNADDR);
 	this.val = (val != undefined) ? val : 0; 
 }
+
+const JBooleanFalse = new JInt(0);
+const JBooleanTrue = new JInt(1);
 
 function DefaultValueForType(jtype) {
 	// Default for reference types is null.
@@ -142,15 +146,19 @@ function KLClass(loadedClass, superclass) {
 	this.interfaces = loadedClass.interfaces;
 	this.attributes = loadedClass.attributes;
 		
+	this.isInterface = function() { return (this.accessFlags & ACC_INTERFACE) != 0; }
 	this.typeOfInstances = new JType("L" + this.className + ";");
-		
+	if (this.isInterface()) {
+		this.typeOfInstances.setIsInterface();
+	}
+	
 	this.createInstance = function() {
-		var jobj = new JObj(this);
+		let jobj = new JObj(this);
 		return jobj;
 	}
 	
 	this.stringFromUtf8Constant = function(index) {
-		var c = this.constantPool[index];
+		let c = this.constantPool[index];
 		// XXX: should be utf8ToString, which doesn't work rn.
 	    return String.fromCharCode.apply(null, c["bytes"]);
 	}
@@ -175,31 +183,31 @@ function KLClass(loadedClass, superclass) {
 	}
 	
 	this.methodReferenceFromIndex = function(index) {
-		var methodInfo = this.constantPool[index];
+		let methodInfo = this.constantPool[index];
 		let isInterface = methodInfo.tag == CONSTANT_InterfaceMethodref;
-		var classConstant = this.constantPool[methodInfo.class_index];
-		var className = this.classNameFromUtf8Constant(classConstant.name_index);
-		var nameAndType = this.constantPool[methodInfo.name_and_type_index];
-		var methodName = this.stringFromUtf8Constant(nameAndType.name_index);
-		var descriptor = this.descriptorFromUtf8Constant(nameAndType.descriptor_index);
+		let classConstant = this.constantPool[methodInfo.class_index];
+		let className = this.classNameFromUtf8Constant(classConstant.name_index);
+		let nameAndType = this.constantPool[methodInfo.name_and_type_index];
+		let methodName = this.stringFromUtf8Constant(nameAndType.name_index);
+		let descriptor = this.descriptorFromUtf8Constant(nameAndType.descriptor_index);
 		return { "className": className, "methodName": methodName, "descriptor": descriptor, "isInterface": isInterface };
 	}
 	
 	this.fieldReferenceFromIndex = function(index) {
-		var fieldRefInfo = this.constantPool[index];
-		var classConstant = this.constantPool[fieldRefInfo.class_index];
-		var className = this.classNameFromUtf8Constant(classConstant.name_index);
-		var nameAndType = this.constantPool[fieldRefInfo.name_and_type_index];
-		var fieldName = this.stringFromUtf8Constant(nameAndType.name_index);
-		var descriptor = this.descriptorFromUtf8Constant(nameAndType.descriptor_index);
+		let fieldRefInfo = this.constantPool[index];
+		let classConstant = this.constantPool[fieldRefInfo.class_index];
+		let className = this.classNameFromUtf8Constant(classConstant.name_index);
+		let nameAndType = this.constantPool[fieldRefInfo.name_and_type_index];
+		let fieldName = this.stringFromUtf8Constant(nameAndType.name_index);
+		let descriptor = this.descriptorFromUtf8Constant(nameAndType.descriptor_index);
 		return { "className" : className, "fieldName": fieldName, "descriptor": descriptor };
 	}
 		
 	this.attributeWithName = function(targetName) {
-		for (var i = 0; i < this.attributes.length; i++) {
-			var attr = this.attributes[i];
-			var nameIndex = attr.attribute_name_index;
-			var name = this.stringFromUtf8Constant(nameIndex);
+		for (let i = 0; i < this.attributes.length; i++) {
+			let attr = this.attributes[i];
+			let nameIndex = attr.attribute_name_index;
+			let name = this.stringFromUtf8Constant(nameIndex);
 			if (name == targetName) {
 				return attr;
 			}
@@ -238,7 +246,7 @@ function KLClass(loadedClass, superclass) {
 		
 		// Is there code?	
 		let codeAttr = null;
-		for (var j = 0; j < method.attributes.length; j++) {
+		for (let j = 0; j < method.attributes.length; j++) {
 			let attr = method.attributes[j];
 			let attrname = this.stringFromUtf8Constant(attr.attribute_name_index);
 			if (attrname == "Code") {
@@ -277,10 +285,10 @@ function KLClass(loadedClass, superclass) {
 	
 	// Walk the fields in the class and patch them up!
 	for (var i = 0; i < loadedClass.fields.length; i++) {
-		var field = loadedClass.fields[i];
-		var name = this.stringFromUtf8Constant(field.name_index);
-		var desc = this.descriptorFromUtf8Constant(field.descriptor_index);
-		var access_flags = field.access_flags;
+		let field = loadedClass.fields[i];
+		let name = this.stringFromUtf8Constant(field.name_index);
+		let desc = this.descriptorFromUtf8Constant(field.descriptor_index);
+		let access_flags = field.access_flags;
 		
 		this.fields[name] = { "type": new JType(desc), "access": access_flags };
 	}

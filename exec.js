@@ -97,6 +97,9 @@ function KLThreadContext(bootstrapMethod) {
 					continue;
 				}
 				
+				// console.log("Entering -> " + frame.method.name);
+				
+				
 				// If this is a native method, either execute it or if not present, pretend it executed and returned
 				// some default value. 
 				if ((frame.method.access & ACC_NATIVE) != 0 || code == null) { // XXX the code==null condition just helps us with mock objects
@@ -134,6 +137,11 @@ function KLThreadContext(bootstrapMethod) {
 						
 			// Fetch and execute the next instruction.
 			let opcode = code[pc];
+			
+			// 		    let str = Number(opcode).toString(16);
+			// 		    str = str.length == 1 ? "0x0" + str : "0x" + str;
+			// console.log("opcode " + str);
+			//
 			let handler = this.instructionHandlers[opcode];
 			if (!handler) {
 			    let str = Number(opcode).toString(16);
@@ -266,6 +274,19 @@ function KLThreadContext(bootstrapMethod) {
 					thread.pushFrame(initFrame);
 					break;
 				}
+			case CONSTANT_Integer:
+				val = new JInt(constref.bytes);
+				break;
+			case CONSTANT_Float:
+				{
+					let bytes = [];
+					bytes.push((constref.bytes >>> 24) & 0xFF);
+					bytes.push((constref.bytes >>> 16) & 0xFF);
+					bytes.push((constref.bytes >>> 8) & 0xFF);
+					bytes.push((constref.bytes) & 0xFF);
+					val = new JFloat(fromIEEE754Single(bytes));
+					break;
+				}
 			default:
 				alert("ldc needs a new case for constant " + constref.tag);
 		}
@@ -365,6 +386,15 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_iconst_4] = instr_iconst_n;
 	this.instructionHandlers[INSTR_iconst_5] = instr_iconst_n;
 	
+	const instr_fconst_f = function(frame, opcode) {
+		let f = opcode - INSTR_fconst_0;
+		frame.operandStack.push(new JFloat(f * 1.0));
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_fconst_0] = instr_fconst_f;
+	this.instructionHandlers[INSTR_fconst_1] = instr_fconst_f;
+	this.instructionHandlers[INSTR_fconst_2] = instr_fconst_f;
+	
 	this.instructionHandlers[INSTR_anewarray] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
 		let constref = frame.method.class.constantPool[index];
@@ -374,11 +404,12 @@ function KLThreadContext(bootstrapMethod) {
 		if (!count.isa.isInt()) {
 			debugger;
 		}
-		if (count < 0) {
+		let intCount = count.val;
+		if (intCount < 0) {
 			thread.throwException("NegativeArraySizeException");
 			return;
 		}
-		let newarray = new JArray(arrayClass.typeOfInstances, count.val);
+		let newarray = new JArray(arrayClass.typeOfInstances, intCount);
 		frame.operandStack.push(newarray);
 		IncrementPC(frame, 3);
 	}
@@ -388,7 +419,8 @@ function KLThreadContext(bootstrapMethod) {
 		if (!count.isa.isInt()) {
 			debugger;
 		}
-		if (count < 0) {
+		let intCount = count.val;
+		if (intCount < 0) {
 			thread.throwException("NegativeArraySizeException");
 			return;
 		}
@@ -397,7 +429,7 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		let jtype = JTypeFromJVMArrayType(atype);
-		let arrayref = new JArray(jtype, count);
+		let arrayref = new JArray(jtype, intCount);
 		frame.operandStack.push(arrayref);
 		IncrementPC(frame, 2);
 	}
@@ -416,6 +448,18 @@ function KLThreadContext(bootstrapMethod) {
 		let value = frame.operandStack.pop();
 		frame.operandStack.push(value);
 		frame.operandStack.push(value);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_dup_x1] = function(frame) {
+		let value1 = frame.operandStack.pop();
+		let value2 = frame.operandStack.pop();
+		if (!value1.isa.isCategory1ComputationalType()  || !value2.isa.isCategory1ComputationalType()) {
+			debugger;
+		}
+		frame.operandStack.push(value1);
+		frame.operandStack.push(value2);
+		frame.operandStack.push(value1);
 		IncrementPC(frame, 1);
 	}
 	
@@ -440,11 +484,21 @@ function KLThreadContext(bootstrapMethod) {
 		let args = frame.operandStack.splice(argsCount * -1.0, argsCount);
 		let jobj = frame.operandStack.pop();
 		args.unshift(jobj);
-		// If the method being requested is in a superclass of the *currently executing* method's class,
-		// then it represents an explicit or implicit call into a superclass, which means that we *don't*
-		// want to take overrides into account.
+		// Generally, we want to invoke the named method on the object given, meaning by 
+		// looking directly at its class's vtable and using whatever matching entry we find, even
+		// if it reflects an override in a subclass from what is actually referenced. The only
+		// time we want to *strictly* resolve the method in the actual class referenced is when 
+		// the currently executing method's class is referencing a method in one of its own superclasses--
+		// because the compiler would have had knowledge of the override within the class and chose the
+		// specific non-overridden version. 
+		//
+		// This condition alone is not enough, though, because it must also be true that the given 
+		// object is the type of (or a subclass of the class of) the currently-executing method. That
+		// will ensure that, for example, a method on Object is not chosen incorectly becaue it is 
+		// the ancestor of *both* the object's class and the current method's classe. 
 		let contextClass = jobj.class;
-		if (IsClassASubclassOf(frame.method.class.className, methodRef.className)) {
+		if ((jobj.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(jobj.class.className, frame.method.class.className)) && 
+			IsClassASubclassOf(frame.method.class.className, methodRef.className)) {
 			contextClass = null;
 		}
 		let method = ResolveMethodReference(methodRef, contextClass);  
@@ -517,6 +571,20 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_iload_2] = instr_iload_n;
 	this.instructionHandlers[INSTR_iload_3] = instr_iload_n;
 	
+	const instr_fload_n = function(frame, opcode) {
+		let n = opcode - INSTR_fload_0;
+		let value = frame.localVariables[n];
+		if (!value.isa.isFloat()) {
+			debugger;
+		}
+		frame.operandStack.push(value);
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_fload_0] = instr_fload_n;
+	this.instructionHandlers[INSTR_fload_1] = instr_fload_n;
+	this.instructionHandlers[INSTR_fload_2] = instr_fload_n;
+	this.instructionHandlers[INSTR_fload_3] = instr_fload_n;
+	
 	this.instructionHandlers[INSTR_arraylength] = function(frame, opcode, thread) {
 		let arrayref = frame.operandStack.pop();
 		if (arrayref.isa.isNull()) {
@@ -534,6 +602,9 @@ function KLThreadContext(bootstrapMethod) {
 	
 	const instr_if_cond = function(frame, opcode) {
 		let value = frame.operandStack.pop();
+		if (!value) {
+			debugger;
+		}
 		if (!value.isa.isInt()) {
 			debugger;
 		}
@@ -616,6 +687,32 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_if_icmpgt] = instr_if_icmp_cond;
 	this.instructionHandlers[INSTR_if_icmple] = instr_if_icmp_cond;
 	
+	const instr_fcmp_op = function(frame, opcode) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isFloat() || !value2.isa.isFloat()) {
+			debugger;
+		}
+		let floatVal1 = value1.val;
+		let floatVal2 = value2.val;
+		if (value1.isNaN() || value2.isNaN()) {
+			if (opcode == INSTR_fcmpl) {
+				frame.operandStack.push(new JInt(-1));
+			} else {
+				frame.operandStack.push(new JInt(1));
+			}
+		} else if (floatVal1 > floatVal2) {
+			frame.operandStack.push(new JInt(1));
+		} else if (floatVal1 == floatVal2) {
+			frame.operandStack.push(new JInt(0));
+		} else if (floatVal1 < floatVal2) {
+			frame.operandStack.push(new JInt(-1));
+		}
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_fcmpg] = instr_fcmp_op;
+	this.instructionHandlers[INSTR_fcmpl] = instr_fcmp_op;
+
 	this.instructionHandlers[INSTR_isub] = function(frame) {
 		let value2 = frame.operandStack.pop();
 		let value1 = frame.operandStack.pop();
@@ -799,6 +896,30 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	this.instructionHandlers[INSTR_ishr] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		let intVal1 = value1.val;
+		let intVal2 = value2.val;
+		let s = intVal2 & 0x1F;
+		let intResult = intVal1 >> s;   // the JS >> operator does sign extension as ishr requires
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_ishl] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		let intVal1 = value1.val;
+		let intVal2 = value2.val;
+		let s = intVal2 & 0x1F;
+		let intResult = intVal1 << s;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
 	this.instructionHandlers[INSTR_i2b] = function(frame) {
 		let value = frame.operandStack.pop();
 		if (!value.isa.isInt()) {
@@ -812,6 +933,43 @@ function KLThreadContext(bootstrapMethod) {
 		let result = new JInt(intResult);
 		frame.operandStack.push(result);
 		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_i2c] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		let intResult = value.val & 0x0000FFFF;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_i2f] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		let result = new JFloat(value.val);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_f2i] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isFloat()) {
+			debugger;
+		}
+		let intResult;
+		if (value.isNaN()) {
+			intResult = 0;
+		} else {
+			intResult = Math.trunc(value.val);
+		}
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);		
 	}
 	
 	const instr_int_astore = function(frame, opcode, thread) {
@@ -855,6 +1013,29 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_castore] = instr_int_astore;
 	this.instructionHandlers[INSTR_sastore] = instr_int_astore;
 	
+	this.instructionHandlers[INSTR_aastore] = function(frame, opcode, thread) {
+		let value = frame.operandStack.pop();
+		let index = frame.operandStack.pop();
+		let arrayref = frame.operandStack.pop();
+		if (arrayref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return;
+		}
+		if (!value.isa.isReferenceType() || !index.isa.isInt() || !arrayref.isa.isArray() || !arrayref.containsType.isReferenceType()) {
+			debugger;
+		}
+		if (!TypeIsAssignableToType(value.isa, arrayref.containsType)) {
+			debugger;
+		}
+		let indexVal = index.val;
+		if (indexVal < 0 || indexVal >= arrayref.count) {
+			thread.throwException("java.lang.ArrayIndexOutOfBoundsException");
+			return;
+		}
+		arrayref.elements[indexVal] = value;
+		IncrementPC(frame, 1);
+	}
+	
 	this.instructionHandlers[INSTR_pop] = function(frame) {
 		let value = frame.operandStack.pop();
 		if (!value.isa.isCategory1ComputationalType()) {
@@ -873,4 +1054,154 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	this.instructionHandlers[INSTR_idiv] = function(frame, opcode, thread) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();	
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}				
+		if (value2.val == 0) {
+			thread.throwException("java.lang.ArithmeticException");
+			return;
+		}
+		let div = value1.val / value2.val;
+		let intResult = Math.trunc(div);
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_iadd] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}				
+		// XXX This must be constrained to the 32-bit value range and overflow correctly.
+		let intResult = value1.val + value2.val;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_imul] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}				
+		let intResult = (value1.val * value2.val) & 0xFFFFFFFF;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_fmul] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isFloat() || !value2.isa.isFloat()) {
+			debugger;
+		}				
+		let floatResult = value1.val * value2.val;
+		let result = new JFloat(floatResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	const instr_istore_n = function(frame, opcode) {
+		let index = opcode - INSTR_istore_0;
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		frame.localVariables[index] = value;
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_istore_0] = instr_istore_n;
+	this.instructionHandlers[INSTR_istore_1] = instr_istore_n;
+	this.instructionHandlers[INSTR_istore_2] = instr_istore_n;
+	this.instructionHandlers[INSTR_istore_3] = instr_istore_n;
+
+	this.instructionHandlers[INSTR_ixor] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}				
+		let intResult = value1.val ^ value2.val;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_iand] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}				
+		let intResult = value1.val & value2.val;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_ior] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}				
+		let intResult = value1.val | value2.val;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_checkcast] = function(frame, opcode, thread) {
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType()) {
+			debugger;
+		}
+		let castOK = false;
+		if (objectref.isa.isNull()) {
+			castOK = true;
+		} else {
+			let index = U16FromInstruction(frame);
+			let classref = frame.method.class.constantPool[index];
+			if (ref.tag != CONSTANT_Class) {
+				debugger;
+			}
+			let className = frame.method.class.classNameFromUtf8Constant(classref.name_index); 
+			let T = ResolveClass(className);
+			let S = objectref.isa;
+			if (S.isClass()) {
+				if (T.isInterface()) {
+					castOK = S.implementsInterface(T.className);
+				} else {
+					castOK = ((T.className == S.className) || (IsClassASubclassOf(S.name, T.className)));
+				}
+			} else if (S.isInterface()) {
+				if (T.isInterface()) {
+					castOK = ((T.className == S.className) || (IsClassASubclassOf(S.name, T.className)));
+				} else {
+					castOK = (T.className == "java.lang.Object");
+				}
+			} else if (S.isArray()) {
+				let SC = S.componentType;
+				if (T.isInterface()) {
+					castOK = (T.className == "java.lang.Object" || T.className == "java.lang.Cloneable" || T.className == "java.io.Serializeable");
+				} else {
+					castOK = (T.className == "java.lang.Object");
+				}
+			}
+			// XXX doesn't handle "array classes" because this VM currently doesn't really do that well, or at all.
+		}
+		if (!castOK) {
+			thread.throwException("java.lang.ClassCastException");
+			return;
+		}
+		frame.operandStack.push(objectref);
+		IncrementPC(frame, 3);
+	}
 }
