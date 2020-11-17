@@ -9,6 +9,7 @@
 // Resolved classes
 let LoadedClasses = [];
 let ClassesToJavaLangClass = {};
+let PrimitivesToJavaLangClass = {};
 
 // Debugger infrastructure
 let JavaBreakpoints = [];  // { fileName: lineNumber} OR { methodName: fqmn }
@@ -51,6 +52,20 @@ function LoadClassFromJDK(className) {
 	}
 	return null;
 }
+
+function CreateArrayClass(className) {
+	// Create a synthetic "loaded class" for this array class. 
+	let syntheticLoadedClass = new KLLoadedClass(className, 
+		"java.lang.Object", 
+		(ACC_PUBLIC | ACC_FINAL), 
+		[],
+		["java.lang.Cloneable", "java.io.Serializable"],
+		[], []);
+	// Create a class object for it.
+	let superclass = ResolveClass("java.lang.Object");
+	let klclass = new KLClass(syntheticLoadedClass, superclass);
+	return klclass;		
+}
 	
 function ResolveClass(className) {
 	if (!className) {
@@ -64,21 +79,21 @@ function ResolveClass(className) {
 		}
 	}
 	
+	// Is this an array class? These are special KLClass instances that represent array types. 
+	// Their names are array type descriptors.
+	if (/^\[+(B|Z|I|D|F|C|J|S|L.+;)$/.test(className)) {
+		let arrayClass = CreateArrayClass(className);
+		AddClass(arrayClass);
+		return arrayClass;
+	}
+	
 	// Class was not present. Look in the JDK library.
 	let jdkClass = LoadClassFromJDK(className);
 	if (jdkClass) {
 		AddClass(jdkClass);
 		return jdkClass;
 	}
-	
-	// Is this some kind of wacko primitive class??
-	if (/^\[?(B|Z|I|D|F|C|J|S|L.+;)$/.test(className)) {
-		// Sigh. Ok. Cook up a class object for this oddball thing. This is going to blow up on me.
-		let primitiveClass = new KLClass({"className": className, "superclassName": "java.lang.Object" });
-		AddClass(primitiveClass);
-		return primitiveClass;
-	}
-	
+		
 	console.log("ERROR: Failed to resolve class " + className);
 	return null;
 }
@@ -112,7 +127,7 @@ function JSStringFromJavaLangStringObj(jobj) {
 }
 
 function JavaLangClassObjForClass(klclass) {
-	let jclass = ClassesToJavaLangClass[klclass];
+	let jclass = ClassesToJavaLangClass[klclass.className];
 	if (!jclass) {
 		let classClass = ResolveClass("java.lang.Class");
 		if (!classClass) {
@@ -123,7 +138,23 @@ function JavaLangClassObjForClass(klclass) {
 		// Set the referenced class name. [!] This is supposed to be set by native method initClassName.
 		jclass.fieldValsByClass["java.lang.Class"]["name"] = JavaLangStringObjForJSString(klclass.className);
 		jclass.meta["classClass"] = klclass;
-		ClassesToJavaLangClass[klclass] = jclass;
+		ClassesToJavaLangClass[klclass.className] = jclass;
+	}
+	return jclass;
+}
+
+function JavaLangClassObjForPrimitive(primitiveStr) {
+	let jclass = PrimitivesToJavaLangClass[primitiveStr];
+	if (!jclass) {
+		let classClass = ResolveClass("java.lang.Class");
+		if (!classClass) {
+			
+			// throw??
+		}
+		jclass = classClass.createInstance();
+		// Set the referenced class name. [!] This is supposed to be set by native method initClassName.
+		jclass.fieldValsByClass["java.lang.Class"]["name"] = JavaLangStringObjForJSString(primitiveStr);
+		PrimitivesToJavaLangClass[primitiveStr] = jclass;
 	}
 	return jclass;
 }
@@ -249,16 +280,12 @@ function ObjectIsA(jobj, className) {
 	if (jobj.class.className == className) {
 		return true;
 	}
-	let current = jobj.class;
-	while (current.superclassName) {
-		let superclassName = current.superclassName;
-		current = ResolveClass(superclassName);
-		if (current.className == className) {
-			return true;
-		}
+	if (IsClassASubclassOf(jobj.class.className, className)) {
+		return true;
 	}
-	
-	// We ran out of superclasses
+	if (DoesClassImplementInterface(jobj.class.className, className)) {
+		return true;
+	}
 	return false;
 }
 
@@ -1640,11 +1667,11 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	// InjectOutputMockObjects();
 	
 	//Create the VM startup thread.
-	let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
-	if (initPhase1Method) {
-		let ctx = new KLThreadContext(initPhase1Method);
-		ctx.exec();
-	}
+	// let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
+	// if (initPhase1Method) {
+	// 	let ctx = new KLThreadContext(initPhase1Method);
+	// 	ctx.exec();
+	// }
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();

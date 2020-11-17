@@ -125,11 +125,11 @@ const KLCLASS_STATE_UNINITIALIZED = 0;
 const KLCLASS_STATE_INITIALIZING  = 1;
 const KLCLASS_STATE_INITIALIZED   = 2;
 
-function KLClass(loadedClass, superclass) {
+function KLClass(loadedOrArrayClass, superclass) {
 	this.superclass = superclass;
-	this.className = loadedClass.className;
-	this.superclassName = loadedClass.superclassName;
-	this.accessFlags = loadedClass.accessFlags;
+	this.className = loadedOrArrayClass.className;
+	this.superclassName = loadedOrArrayClass.superclassName;
+	this.accessFlags = loadedOrArrayClass.accessFlags;
 	
 	this.state = KLCLASS_STATE_UNINITIALIZED;
 	this.monitor = 0;
@@ -139,17 +139,21 @@ function KLClass(loadedClass, superclass) {
 	
 	// static data
 	this.fieldValsByClass = {};	// keyed by classname:{name:value}
-	this.isInitialized = false;
 	
 	// Keep the constant pool and attributes around. We'll need them for runtime lookups.
-	this.constantPool = loadedClass.constantPool;
-	this.interfaces = loadedClass.interfaces;
-	this.attributes = loadedClass.attributes;
+	this.constantPool = loadedOrArrayClass.constantPool;
+	this.interfaces = loadedOrArrayClass.interfaces;
+	this.attributes = loadedOrArrayClass.attributes;
 		
+	this.isArray = function() { return this.className[0] == "["; }
 	this.isInterface = function() { return (this.accessFlags & ACC_INTERFACE) != 0; }
-	this.typeOfInstances = new JType("L" + this.className + ";");
-	if (this.isInterface()) {
-		this.typeOfInstances.setIsInterface();
+	if (this.isArray()) {
+		this.typeOfInstances = new JType(this.className);
+	} else {
+		this.typeOfInstances = new JType("L" + this.className + ";");
+		if (this.isInterface()) {
+			this.typeOfInstances.setIsInterface();
+		}		
 	}
 	
 	this.createInstance = function() {
@@ -223,6 +227,23 @@ function KLClass(loadedClass, superclass) {
 		return null;
 	}
 	
+	// Array-specific routines
+	this.arrayDimensions = function() {
+		if (!this.isArray()) {
+			debugger;
+			return 0;
+		}
+		return this.typeOfInstances.arrayDimensions();
+	}
+	
+	this.arrayComponentType = function() {
+		if (!this.isArray()) {
+			debugger;
+			return 0;
+		}
+		return this.typeOfInstances.arrayComponentType();
+	}
+	
 	//
 	// Set up this class object.
 	//
@@ -238,8 +259,8 @@ function KLClass(loadedClass, superclass) {
 	this.vtable = superclass ? Object.assign({}, superclass.vtable) : {};
 	
 	// Walk the loaded methods in the class and patch them up.
-	for (let i = 0; i < loadedClass.methods.length; i++) {
-		let method = loadedClass.methods[i];
+	for (let i = 0; i < loadedOrArrayClass.methods.length; i++) {
+		let method = loadedOrArrayClass.methods[i];
 		let name = this.stringFromUtf8Constant(method.name_index);
 		let desc = this.descriptorFromUtf8Constant(method.descriptor_index);
 		let access_flags = method.access_flags;
@@ -284,8 +305,8 @@ function KLClass(loadedClass, superclass) {
 	}
 	
 	// Walk the fields in the class and patch them up!
-	for (var i = 0; i < loadedClass.fields.length; i++) {
-		let field = loadedClass.fields[i];
+	for (var i = 0; i < loadedOrArrayClass.fields.length; i++) {
+		let field = loadedOrArrayClass.fields[i];
 		let name = this.stringFromUtf8Constant(field.name_index);
 		let desc = this.descriptorFromUtf8Constant(field.descriptor_index);
 		let access_flags = field.access_flags;

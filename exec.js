@@ -24,6 +24,9 @@ function KLThreadContext(bootstrapMethod) {
 	this.popFrame = function(isAbrupt) {
 		let isNormal = !(isAbrupt);
 		let outgoingFrame = this.stack.shift();
+		if (AccessFlagIsSet(outgoingFrame.method.access, ACC_SYNCHRONIZED)) {
+			// XXX: release method monitor.
+		}
 		if (isNormal) {
 			for (let i = 0; i < outgoingFrame.completionHandlers.length; i++) {
 				outgoingFrame.completionHandlers[i](outgoingFrame);
@@ -77,7 +80,9 @@ function KLThreadContext(bootstrapMethod) {
 					continue;
 				} else {
 					// Nowhere left to throw... 
-					console.log("JVM: Java thread terminated due to unhandled exception " + exception.class.className);
+					let jmessage = exception.fieldValsByClass["java.lang.Throwable"]["detailMessage"];
+					let message = jmessage ? JSStringFromJavaLangStringObj(jmessage) : "(unknown)";
+					console.log("JVM: Java thread terminated due to unhandled exception " + exception.class.className + ":\n\t" + message);
 					return; 
 				}
 				
@@ -97,8 +102,11 @@ function KLThreadContext(bootstrapMethod) {
 					continue;
 				}
 				
-				// console.log("Entering -> " + frame.method.name);
+				// console.log("Entering -> " + this.currentFQMethodName());
 				
+				if (AccessFlagIsSet(frame.method.access, ACC_SYNCHRONIZED)) {
+					// XXX: acquire method monitor.
+				}
 				
 				// If this is a native method, either execute it or if not present, pretend it executed and returned
 				// some default value. 
@@ -141,7 +149,7 @@ function KLThreadContext(bootstrapMethod) {
 			// 		    let str = Number(opcode).toString(16);
 			// 		    str = str.length == 1 ? "0x0" + str : "0x" + str;
 			// console.log("opcode " + str);
-			//
+
 			let handler = this.instructionHandlers[opcode];
 			if (!handler) {
 			    let str = Number(opcode).toString(16);
@@ -297,6 +305,36 @@ function KLThreadContext(bootstrapMethod) {
 	};
 	this.instructionHandlers[INSTR_ldc] = instr_ldc;
 	this.instructionHandlers[INSTR_ldc_w] = instr_ldc;
+	
+	// this.instructionHandlers[INSTR_ldc2_w] = function(frame, opcode, thread) {
+	// 	index = U16FromInstruction(frame);
+	// 	let constref = frame.method.class.constantPool[index];
+	// 	let val;
+	// 	if (constref.tag == CONSTANT_Long) {
+	// 		if (constref.high_bytes != 0) {
+	// 			val = NaN;  // oh god
+	// 		} else {
+	// 			val = constref.low_bytes;
+	// 		}
+	// 		val = new JLong(val);
+	// 	} else if (constref.tag == CONSTANT_Double) {
+	// 		let bytes = [];
+	// 		bytes.push((constref.high_bytes >>> 24) & 0xFF);
+	// 		bytes.push((constref.high_bytes >>> 16) & 0xFF);
+	// 		bytes.push((constref.high_bytes >>> 8) & 0xFF);
+	// 		bytes.push((constref.high_bytes) & 0xFF);
+	// 		bytes.push((constref.low_bytes >>> 24) & 0xFF);
+	// 		bytes.push((constref.low_bytes >>> 16) & 0xFF);
+	// 		bytes.push((constref.low_bytes >>> 8) & 0xFF);
+	// 		bytes.push((constref.low_bytes) & 0xFF);
+	// 		val = new JDouble(fromIEEE754Double(bytes));
+	// 	} else {
+	// 		console.log("ERROR: ldc2_w trying to load a constant that's not a long or double");
+	// 		val = undefined;
+	// 	}
+	// 	frame.operandStack.push(val);
+	// 	IncrementPC(frame, 3);
+	// }
 	
 	this.instructionHandlers[INSTR_getstatic] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
@@ -1203,5 +1241,37 @@ function KLThreadContext(bootstrapMethod) {
 		}
 		frame.operandStack.push(objectref);
 		IncrementPC(frame, 3);
+	}
+	
+	const instr_if_acmp_cond = function(frame, opcode, thread) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isReferenceType() || !value2.isa.isReferenceType()) {
+			debugger;
+		}				
+		// This is essentially strict pointer equality. Is this the right way to check for "equals" here? 
+		if ((opcode == INSTR_if_acmpeq && value1 == value2) ||
+			(opcode == INSTR_if_acmpne && value1 != value2)) {
+			let offset = S16FromInstruction(frame);
+			IncrementPC(frame, offset);
+		} else {
+			IncrementPC(frame, 3);
+		}
+	}
+	this.instructionHandlers[INSTR_if_acmpeq] = instr_if_acmp_cond;
+	this.instructionHandlers[INSTR_if_acmpne] = instr_if_acmp_cond;
+	
+	this.instructionHandlers[INSTR_athrow] = function(frame, opcode, thread) {
+		let objectref = frame.operandStack.pop();
+		if (objectref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return;
+		} 
+		if (!ObjectIsA(objectref, "java.lang.Throwable")) {
+			debugger;
+		}
+		// N.B. The pc doesn't change here, so the exception handler lookup will happen relative
+		// to this instruction.
+		frame.pendingException = objectref;
 	}
 }

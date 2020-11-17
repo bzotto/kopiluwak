@@ -27,16 +27,7 @@ KLNativeImpls["java.lang.Class"] = {
 	},
 	"getPrimitiveClass#(Ljava.lang.String;)Ljava.lang.Class;": function(nameObj) {
 		let primitiveName = JSStringFromJavaLangStringObj(nameObj);
-		if (primitiveName == "int") {
-			let c = ResolveClass("java.lang.Integer");
-			return JavaLangClassObjForClass(c);
-		} else if (primitiveName == "float") {
-			let c = ResolveClass("java.lang.Float");
-			return JavaLangClassObjForClass(c);
-		} else {
-			debugger;
-			return new JNull();
-			}
+		return JavaLangClassObjForPrimitive(primitiveName);
 	}
 };
 
@@ -61,8 +52,20 @@ KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 		arr.elements[1] = JavaLangStringObjForJSString("/");
 		return arr;
 	},
-	"platformProperties#()[Ljava.lang.String;": function() { 
+	"platformProperties#()[Ljava.lang.String;": function() {
+		// Pull out the number of props we need to supply.
+		// let propsRawClass = ResolveClass("jdk.internal.util.SystemProps$Raw");
+		// let maxPropsValue = propsRawClass.fieldValsByClass["jdk.internal.util.SystemProps$Raw"]["FIXED_LENGTH"];
 		let strClass = ResolveClass("java.lang.String");
 		return new JArray(strClass.typeOfInstances, 42);
+	}
+};
+
+KLNativeImpls["jdk.internal.misc.Unsafe"] = {
+	"arrayBaseOffset0#(Ljava.lang.Class;)I": function() {
+		return new JInt(0);
+	},
+	"arrayIndexScale0#(Ljava.lang.Class;)I": function() {
+		return new JInt(0);
 	}
 };
