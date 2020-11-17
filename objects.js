@@ -66,7 +66,7 @@ function JInt(val) {
 
 function JLong(val) {
 	this.isa = new JType(JTYPE_LONG);
-	this.val = (val != undefined) ? val : 0n;
+	this.val = (val != undefined) ? val : KLInt64Zero;
 }
 
 function JChar(val) {

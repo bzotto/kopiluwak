@@ -306,35 +306,30 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_ldc] = instr_ldc;
 	this.instructionHandlers[INSTR_ldc_w] = instr_ldc;
 	
-	// this.instructionHandlers[INSTR_ldc2_w] = function(frame, opcode, thread) {
-	// 	index = U16FromInstruction(frame);
-	// 	let constref = frame.method.class.constantPool[index];
-	// 	let val;
-	// 	if (constref.tag == CONSTANT_Long) {
-	// 		if (constref.high_bytes != 0) {
-	// 			val = NaN;  // oh god
-	// 		} else {
-	// 			val = constref.low_bytes;
-	// 		}
-	// 		val = new JLong(val);
-	// 	} else if (constref.tag == CONSTANT_Double) {
-	// 		let bytes = [];
-	// 		bytes.push((constref.high_bytes >>> 24) & 0xFF);
-	// 		bytes.push((constref.high_bytes >>> 16) & 0xFF);
-	// 		bytes.push((constref.high_bytes >>> 8) & 0xFF);
-	// 		bytes.push((constref.high_bytes) & 0xFF);
-	// 		bytes.push((constref.low_bytes >>> 24) & 0xFF);
-	// 		bytes.push((constref.low_bytes >>> 16) & 0xFF);
-	// 		bytes.push((constref.low_bytes >>> 8) & 0xFF);
-	// 		bytes.push((constref.low_bytes) & 0xFF);
-	// 		val = new JDouble(fromIEEE754Double(bytes));
-	// 	} else {
-	// 		console.log("ERROR: ldc2_w trying to load a constant that's not a long or double");
-	// 		val = undefined;
-	// 	}
-	// 	frame.operandStack.push(val);
-	// 	IncrementPC(frame, 3);
-	// }
+	this.instructionHandlers[INSTR_ldc2_w] = function(frame, opcode, thread) {
+		index = U16FromInstruction(frame);
+		let constref = frame.method.class.constantPool[index];
+		let val;
+		let bytes = [];
+		bytes.push((constref.high_bytes >>> 24) & 0xFF);
+		bytes.push((constref.high_bytes >>> 16) & 0xFF);
+		bytes.push((constref.high_bytes >>> 8) & 0xFF);
+		bytes.push((constref.high_bytes) & 0xFF);
+		bytes.push((constref.low_bytes >>> 24) & 0xFF);
+		bytes.push((constref.low_bytes >>> 16) & 0xFF);
+		bytes.push((constref.low_bytes >>> 8) & 0xFF);
+		bytes.push((constref.low_bytes) & 0xFF);
+		if (constref.tag == CONSTANT_Long) {
+			let int64 = new KLInt64(bytes);
+			val = new JLong(int64);
+		} else if (constref.tag == CONSTANT_Double) {
+			val = new JDouble(fromIEEE754Double(bytes));
+		} else {
+			debugger;
+		}
+		frame.operandStack.push(val);
+		IncrementPC(frame, 3);
+	}
 	
 	this.instructionHandlers[INSTR_getstatic] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
@@ -423,6 +418,19 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_iconst_3] = instr_iconst_n;
 	this.instructionHandlers[INSTR_iconst_4] = instr_iconst_n;
 	this.instructionHandlers[INSTR_iconst_5] = instr_iconst_n;
+	
+	const instr_lconst_l = function(frame, opcode) {
+		let val;
+		if (opcode == INSTR_lconst_0) {
+			val = KLInt64Zero;
+		} else {
+			val = new KLInt64([0, 0, 0, 0, 0, 0, 0, 1]);  // == 1
+		}
+		frame.operandStack.push(new JLong(val));
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_lconst_0] = instr_lconst_l;
+	this.instructionHandlers[INSTR_lconst_1] = instr_lconst_l;
 	
 	const instr_fconst_f = function(frame, opcode) {
 		let f = opcode - INSTR_fconst_0;
@@ -597,8 +605,6 @@ function KLThreadContext(bootstrapMethod) {
 		let n = opcode - INSTR_iload_0;
 		let value = frame.localVariables[n];
 		if (!value.isa.isInt()) {
-			// error. throw?
-			console.log("iload_n expected int type");
 			debugger;
 		}
 		frame.operandStack.push(value);
@@ -608,6 +614,20 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_iload_1] = instr_iload_n;
 	this.instructionHandlers[INSTR_iload_2] = instr_iload_n;
 	this.instructionHandlers[INSTR_iload_3] = instr_iload_n;
+	
+	const instr_lload_n = function(frame, opcode) {
+		let n = opcode - INSTR_lload_0;
+		let value = frame.localVariables[n];
+		if (!value.isa.isLong()) {
+			debugger;
+		}
+		frame.operandStack.push(value);
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_lload_0] = instr_lload_n;
+	this.instructionHandlers[INSTR_lload_1] = instr_lload_n;
+	this.instructionHandlers[INSTR_lload_2] = instr_lload_n;
+	this.instructionHandlers[INSTR_lload_3] = instr_lload_n;
 	
 	const instr_fload_n = function(frame, opcode) {
 		let n = opcode - INSTR_fload_0;
@@ -750,6 +770,25 @@ function KLThreadContext(bootstrapMethod) {
 	}
 	this.instructionHandlers[INSTR_fcmpg] = instr_fcmp_op;
 	this.instructionHandlers[INSTR_fcmpl] = instr_fcmp_op;
+	
+	this.instructionHandlers[INSTR_lcmp] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isLong()) {
+			debugger;
+		}
+		let diff = KLInt64Subtract(value1.val, value2.val);
+		let result;
+		if (diff.isNegative()) {
+			result = new JInt(-1);
+		} else if (diff.isZero()) {
+			result = new JInt(0);
+		} else {
+			result = new JInt(1);
+		}
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);	
+	}
 
 	this.instructionHandlers[INSTR_isub] = function(frame) {
 		let value2 = frame.operandStack.pop();
@@ -1159,6 +1198,21 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_istore_1] = instr_istore_n;
 	this.instructionHandlers[INSTR_istore_2] = instr_istore_n;
 	this.instructionHandlers[INSTR_istore_3] = instr_istore_n;
+	
+	const instr_lstore_n = function(frame, opcode) {
+		let index = opcode - INSTR_lstore_0;
+		let value = frame.operandStack.pop();
+		if (!value.isa.isLong()) {
+			debugger;
+		}
+		frame.localVariables[index] = value;
+		frame.localVariables[index+1] = value;
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_lstore_0] = instr_lstore_n;
+	this.instructionHandlers[INSTR_lstore_1] = instr_lstore_n;
+	this.instructionHandlers[INSTR_lstore_2] = instr_lstore_n;
+	this.instructionHandlers[INSTR_lstore_3] = instr_lstore_n;
 
 	this.instructionHandlers[INSTR_ixor] = function(frame) {
 		let value2 = frame.operandStack.pop();
