@@ -41,7 +41,13 @@ KLNativeImpls["java.lang.Object"] = {
 };
 
 KLNativeImpls["java.lang.System"] = {
-	"registerNatives#()V": function() {	}
+	"registerNatives#()V": function() {	},
+	"nanoTime#()J": function() {
+		let milliseconds = performance.now();
+		let nanoseconds = Math.trunc(milliseconds * 1000000);
+		let int64 = KLInt64FromNumber(nanoseconds);
+		return new JLong(int64);
+	}
 };
 
 KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {

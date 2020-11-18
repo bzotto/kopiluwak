@@ -1328,4 +1328,80 @@ function KLThreadContext(bootstrapMethod) {
 		// to this instruction.
 		frame.pendingException = objectref;
 	}
+	
+	this.instructionHandlers[INSTR_lshl] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isInt()) {
+			debugger;
+		}
+		let s = value2.val & 0x3F;
+		let int64 = value1.val;
+		let result = new JLong(KLInt64LogicalShiftLeft(int64, s));
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_lshr] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isInt()) {
+			debugger;
+		}
+		let s = value2.val & 0x3F;
+		let int64 = value1.val;
+		let result = new JLong(KLInt64ArithmeticShiftRight(int64, s));
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_lmul] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isLong()) {
+			debugger;
+		}
+		let longResult = KLInt64Multiply(value1.val, value2.val);
+		let result = new JLong(longResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_l2i] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isLong()) {
+			debugger;
+		}
+		let lowWord = value.val.lowWord();
+		let result = new JInt(lowWord);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_i2l] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}			
+		let intVal = value.val;
+		let fillByte = (value.val < 0) ? 0xFF : 0x00;
+		let bytes = [fillByte, fillByte, fillByte, fillByte, 
+			(intVal >> 24) & 0xFF, (intVal >> 16) & 0xFF, (intVal >> 8) & 0xFF, intVal & 0xFF];
+		let longResult = new KLInt64(bytes);
+		let result = new JLong(longResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_land] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isLong()) {
+			debugger;
+		}
+		let longResult = KLInt64BitwiseAnd(value1.val, value2.val);
+		let result = new JLong(longResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
 }
