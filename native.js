@@ -52,8 +52,8 @@ KLNativeImpls["java.lang.System"] = {
 
 KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 	"vmProperties#()[Ljava.lang.String;": function() { 
-		let strClass = ResolveClass("java.lang.String");
-		let arr = new JArray(strClass.typeOfInstances, 4);
+		let arrayClass = ResolveClass("[Ljava.lang.String;");
+		let arr = new JArray(strClass, 4);
 		arr.elements[0] = JavaLangStringObjForJSString("java.home");
 		arr.elements[1] = JavaLangStringObjForJSString("/");
 		return arr;
@@ -62,8 +62,8 @@ KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 		// Pull out the number of props we need to supply.
 		// let propsRawClass = ResolveClass("jdk.internal.util.SystemProps$Raw");
 		// let maxPropsValue = propsRawClass.fieldValsByClass["jdk.internal.util.SystemProps$Raw"]["FIXED_LENGTH"];
-		let strClass = ResolveClass("java.lang.String");
-		return new JArray(strClass.typeOfInstances, 42);
+		let arrayClass = ResolveClass("[Ljava.lang.String;");
+		return new JArray(strClass, 42);
 	}
 };
 

@@ -260,12 +260,13 @@ function KLThreadContext(bootstrapMethod) {
 					let strconst = frame.method.class.constantPool[constref.string_index];
 					let strbytes = strconst.bytes;
 					// Create a string object to wrap the literal.
-					let strclass = ResolveClass("java.lang.String");
-					let strobj = strclass.createInstance();
-					let arrobj = new JArray(new JType(JTYPE_INT), strbytes.length);
+					let arrClass = ResolveClass("[I");
+					let arrobj = new JArray(arrClass, strbytes.length);
 					for (let i = 0; i < strbytes.length; i++) {
 						arrobj.elements[i] = new JInt(strbytes[i]);
 					}
+					let strclass = ResolveClass("java.lang.String");
+					let strobj = strclass.createInstance();
 					// Rig the current frame and the child completion to land on the next instruction with the 
 					// stack looking right.
 					let initMethod = ResolveMethodReference({"className": "java.lang.String", "methodName": "<init>", "descriptor": "([III)V"});
@@ -445,7 +446,7 @@ function KLThreadContext(bootstrapMethod) {
 		let index = U16FromInstruction(frame);
 		let constref = frame.method.class.constantPool[index];
 		let className = frame.method.class.classNameFromUtf8Constant(constref.name_index);
-		let arrayClass = ResolveClass(className);
+		let arrayComponentClass = ResolveClass(className);
 		let count = frame.operandStack.pop();
 		if (!count.isa.isInt()) {
 			debugger;
@@ -455,7 +456,8 @@ function KLThreadContext(bootstrapMethod) {
 			thread.throwException("NegativeArraySizeException");
 			return;
 		}
-		let newarray = new JArray(arrayClass.typeOfInstances, intCount);
+		let arrayClass = CreateArrayClassWithAttributes(arrayComponentClass, 1);
+		let newarray = new JArray(arrayClass, intCount);
 		frame.operandStack.push(newarray);
 		IncrementPC(frame, 3);
 	}
@@ -475,7 +477,8 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		let jtype = JTypeFromJVMArrayType(atype);
-		let arrayref = new JArray(jtype, intCount);
+		let arrayClass = CreateArrayClassFromName("[" + jtype.descriptorString());
+		let arrayref = new JArray(arrayClass, intCount);
 		frame.operandStack.push(arrayref);
 		IncrementPC(frame, 2);
 	}
@@ -599,6 +602,15 @@ function KLThreadContext(bootstrapMethod) {
 		}
 		thread.popFrame();
 		thread.stack[0].operandStack.push(objectref);
+	}
+	
+	this.instructionHandlers[INSTR_dreturn] = function(frame, opcode, thread) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isDouble() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isDouble())  {
+			debugger;
+		}
+		thread.popFrame();
+		thread.stack[0].operandStack.push(value);
 	}
 	
 	const instr_iload_n = function(frame, opcode) {
@@ -1173,6 +1185,35 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	this.instructionHandlers[INSTR_irem] = function(frame, opcode, thread) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isInt() || !value2.isa.isInt()) {
+			debugger;
+		}
+		let intVal1 = value1.val;				
+		let intVal2 = value2.val;				
+		if (intVal2 == 0) {
+			thread.throwException("java.lang.ArithmeticException");
+			return;
+		}
+		let intResult = intVal1 - (Math.trunc(intVal1 / intVal2)) * intVal2;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_ineg] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		let intResult = ((~value.val) + 1) & 0xFFFFFFFF;
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
 	this.instructionHandlers[INSTR_fmul] = function(frame) {
 		let value2 = frame.operandStack.pop();
 		let value1 = frame.operandStack.pop();
@@ -1250,6 +1291,56 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	// Core determination function used by both checkcast and instanceof, sometimes recursively. 
+	function DetermineIfIsInstanceOf(S, T) {
+		let isInstanceOf = false;
+		
+		if (S.isOrdinaryClass()) {
+			if (T.isOrdinaryClass()) {
+				if ((S.className == T.className) || IsClassASubclassOf(S.className, T.className)) {
+					return true;
+				}
+			} else if (T.isInterfaceType()) {
+				if (S.implementsInterface(T.className)) {
+					return true;
+				}
+			}
+		} else if (S.isInterface()) {
+			if (T.isOrdinaryClass()) {
+				if (T.className == "java.lang.Object") {
+					return true;
+				} 
+			} else if (T.isInterface()) {
+				if ((S.className == T.className) || IsClassASubclassOf(S.className, T.className)) {
+					return true;
+				}
+			}
+		} else if (S.isArray()) {
+			let SC = S.arrayComponentType();
+			if (T.isOrdinaryClass()) {
+				if (T.className == "java.lang.Object") {
+					return true;
+				} 
+			} else if (T.isInterface()) {
+				if (S.implementsInterface(T.className)) {
+					return true;
+				}
+			} else if (T.isArray()) {
+				let TC = T.arrayComponentType();
+				if (SC.isPrimitiveType() && TC.isPrimitiveType() && SC.isIdenticalTo(TC)) {
+					return true;
+				} else if (SC.isReferenceType() && TC.isReferenceType()) {
+					// Get the descriptor string from each component type, resolve them each, and then
+					// call this deteminor recursively.
+					let scClass = ResolveClass(SC.descriptorString());
+					let tcClass = ResolveClass(TC.descriptorString());
+					return DetermineIfIsInstanceOf(scClass, tcClass);	
+				}
+			}
+		}
+		return false;
+	}
+
 	this.instructionHandlers[INSTR_checkcast] = function(frame, opcode, thread) {
 		let objectref = frame.operandStack.pop();
 		if (!objectref.isa.isReferenceType()) {
@@ -1261,39 +1352,44 @@ function KLThreadContext(bootstrapMethod) {
 		} else {
 			let index = U16FromInstruction(frame);
 			let classref = frame.method.class.constantPool[index];
-			if (ref.tag != CONSTANT_Class) {
+			if (classref.tag != CONSTANT_Class) {
 				debugger;
 			}
+			let S = objectref.class;
 			let className = frame.method.class.classNameFromUtf8Constant(classref.name_index); 
 			let T = ResolveClass(className);
-			let S = objectref.isa;
-			if (S.isClass()) {
-				if (T.isInterface()) {
-					castOK = S.implementsInterface(T.className);
-				} else {
-					castOK = ((T.className == S.className) || (IsClassASubclassOf(S.name, T.className)));
-				}
-			} else if (S.isInterface()) {
-				if (T.isInterface()) {
-					castOK = ((T.className == S.className) || (IsClassASubclassOf(S.name, T.className)));
-				} else {
-					castOK = (T.className == "java.lang.Object");
-				}
-			} else if (S.isArray()) {
-				let SC = S.componentType;
-				if (T.isInterface()) {
-					castOK = (T.className == "java.lang.Object" || T.className == "java.lang.Cloneable" || T.className == "java.io.Serializeable");
-				} else {
-					castOK = (T.className == "java.lang.Object");
-				}
-			}
-			// XXX doesn't handle "array classes" because this VM currently doesn't really do that well, or at all.
+			castOK = DetermineIfIsInstanceOf(S, T);
 		}
 		if (!castOK) {
 			thread.throwException("java.lang.ClassCastException");
 			return;
 		}
 		frame.operandStack.push(objectref);
+		IncrementPC(frame, 3);
+	}
+		
+	this.instructionHandlers[INSTR_instanceof] = function(frame) {
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType()) {
+			debugger;
+		}
+		let intResult = 0;
+		if (objectref.isa.isNull()) {
+			intResult = 0;
+		} else {
+			let index = U16FromInstruction(frame);
+			let classref = frame.method.class.constantPool[index];
+			if (classref.tag != CONSTANT_Class) {
+				debugger;
+			}
+			let S = objectref.class;
+			let className = frame.method.class.classNameFromUtf8Constant(classref.name_index); 
+			let T = ResolveClass(className);
+			if (DetermineIfIsInstanceOf(S, T)) {
+				intResult = 1;
+			}
+		}
+		frame.operandStack.push(new JInt(intResult));
 		IncrementPC(frame, 3);
 	}
 	
@@ -1351,6 +1447,18 @@ function KLThreadContext(bootstrapMethod) {
 		let s = value2.val & 0x3F;
 		let int64 = value1.val;
 		let result = new JLong(KLInt64ArithmeticShiftRight(int64, s));
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_ladd] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isLong()) {
+			debugger;
+		}
+		let longResult = KLInt64Add(value1.val, value2.val);
+		let result = new JLong(longResult);
 		frame.operandStack.push(result);
 		IncrementPC(frame, 1);
 	}

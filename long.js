@@ -33,6 +33,15 @@ function KLInt64(bytes) {
 	this.highWord = function() {
 		return ((this.storage[0] << 24) | (this.storage[1] << 16) | (this.storage[2] << 8) | this.storage[3]) >>> 0;
 	}
+	
+	this.asHexString = function() {
+		let str = "0x";
+		for (let i = 0; i < 8; i++) {
+		    let hex = Number(this.storage[i]).toString(16);
+		    str += (hex.length == 1) ? "0" + hex : hex;	
+		}
+		return str;
+	}
 }
 
 const KLInt64Zero = new KLInt64([0, 0, 0, 0, 0, 0, 0, 0]);

@@ -87,6 +87,9 @@ function JType(typeOrDescriptor) {
 	this.arrayComponentType = function() {
 		return this.componentType;
 	}
+	this.isOrdinaryClass = function() {
+		return !this.isArray() && !this.isInterface();
+	}
 	this.isIntegralType = function() {
 		return this.type == JTYPE_BYTE || this.type == JTYPE_SHORT || this.type == JTYPE_INT || this.type == JTYPE_LONG;
 	}

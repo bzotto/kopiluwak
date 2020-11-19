@@ -13,7 +13,12 @@ const JOBJ_STATE_INITIALIZING  = 1;
 const JOBJ_STATE_INITIALIZED   = 2;
 
 function JObj(klclass) {
-	this.isa = new JType("L" + klclass.className + ";");
+	
+	if (!klclass.isOrdinaryClass() && !klclass.isInterface()) {
+		debugger;
+	}
+	
+	this.isa = klclass.typeOfInstances;
 	this.class = klclass;
 	this.state = JOBJ_STATE_UNINITIALIZED;
 	this.fieldValsByClass = {};			// keyed by classname:{name:value}
@@ -36,9 +41,14 @@ function JObj(klclass) {
  	} while (currentClass);
 }
 
-function JArray(type, count) {
-	this.isa = new JType("[" + type.descriptorString());
-	this.containsType = type;
+function JArray(klclass, count) {
+	if (!klclass.isArray()) {
+		debugger;
+	}
+	
+	this.isa = klclass.typeOfInstances;
+	this.class = klclass;  
+	this.containsType = this.isa.arrayComponentType(); 
 	this.monitor = 0;
 	this.count = count;
 	this.elements = [];
@@ -145,6 +155,7 @@ function KLClass(loadedOrArrayClass, superclass) {
 	this.interfaces = loadedOrArrayClass.interfaces;
 	this.attributes = loadedOrArrayClass.attributes;
 		
+	
 	this.isArray = function() { return this.className[0] == "["; }
 	this.isInterface = function() { return (this.accessFlags & ACC_INTERFACE) != 0; }
 	if (this.isArray()) {
@@ -155,10 +166,14 @@ function KLClass(loadedOrArrayClass, superclass) {
 			this.typeOfInstances.setIsInterface();
 		}		
 	}
+	this.isOrdinaryClass = function() { return !this.isArray() && !this.isInterface(); }
 	
 	this.createInstance = function() {
+		if (!this.isOrdinaryClass()) {
+			debugger;
+		}
 		let jobj = new JObj(this);
-		return jobj;
+		return jobj;			
 	}
 	
 	this.stringFromUtf8Constant = function(index) {

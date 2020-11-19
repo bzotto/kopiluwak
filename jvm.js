@@ -53,7 +53,10 @@ function LoadClassFromJDK(className) {
 	return null;
 }
 
-function CreateArrayClass(className) {
+function CreateArrayClassFromName(className) {
+	if (className[0] != "[") {
+		debugger;
+	}
 	// Create a synthetic "loaded class" for this array class. 
 	let syntheticLoadedClass = new KLLoadedClass(className, 
 		"java.lang.Object", 
@@ -65,6 +68,15 @@ function CreateArrayClass(className) {
 	let superclass = ResolveClass("java.lang.Object");
 	let klclass = new KLClass(syntheticLoadedClass, superclass);
 	return klclass;		
+}
+
+function CreateArrayClassWithAttributes(componentClass, dimensions) {
+	let descStr = "";
+	for (let i = 0; i < dimensions; i++) {
+		descStr += "[";
+	}
+	descStr += ("L" + componentClass.className + ";");
+	return CreateArrayClassFromName(descStr);
 }
 	
 function ResolveClass(className) {
@@ -82,7 +94,7 @@ function ResolveClass(className) {
 	// Is this an array class? These are special KLClass instances that represent array types. 
 	// Their names are array type descriptors.
 	if (/^\[+(B|Z|I|D|F|C|J|S|L.+;)$/.test(className)) {
-		let arrayClass = CreateArrayClass(className);
+		let arrayClass = CreateArrayClassFromName(className);
 		AddClass(arrayClass);
 		return arrayClass;
 	}
@@ -104,7 +116,9 @@ function JavaLangStringObjForJSString(jsStr) {
 		let intobj = new JInt(jsStr.charCodeAt(i));
         bytes.push(intobj);
     }
-	let byteArray = new JArray(new JType(JTYPE_BYTE), bytes.length);
+	
+	let arrayClass = ResolveClass("[B");
+	let byteArray = new JArray(arrayClass, bytes.length);
 	byteArray.elements = bytes;
 	let stringClass = ResolveClass("java.lang.String");
 	stringObj = stringClass.createInstance();
@@ -198,12 +212,8 @@ function DoesClassImplementInterface(className, interfaceName) {
 function ResolveMethodReference(methodRef, contextClass) {
 	// In general, we look for the method directly in the vtable of the contextClass, which is how overidden
 	// methods are implemented here, with each subclass getting a full vtable of its whole inheritance chain.
-
+	// The methodRef's class can also be an interface class if the method is a static method on the interface.
 	if (!contextClass) {
-		if (methodRef.isInterface) {
-			// ??
-			debugger;
-		}
 		contextClass = ResolveClass(methodRef.className);
 	}
 	
