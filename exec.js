@@ -104,6 +104,8 @@ function KLThreadContext(bootstrapMethod) {
 				
 				// console.log("Entering -> " + this.currentFQMethodName());
 				
+				if (ShouldBreakOnMethodStart(this)) { debugger; }
+				
 				if (AccessFlagIsSet(frame.method.access, ACC_SYNCHRONIZED)) {
 					// XXX: acquire method monitor.
 				}
@@ -113,11 +115,14 @@ function KLThreadContext(bootstrapMethod) {
 				if ((frame.method.access & ACC_NATIVE) != 0 || code == null) { // XXX the code==null condition just helps us with mock objects
 					// Check if this is a native method we don't support. If so, log it and return a default value.
 					if (frame.method.impl) {
-						// Execute the native method impl if present.
-						let hasresult = !frame.method.descriptor.returnsVoid();
-						let result = frame.method.impl.apply(null, frame.localVariables);
+						// Marshal the thread context and arguments for the native implementation. 
+						// First argument to an internal implementation is always the KLThreadContext, followed by the 
+						// normal Java-land args for the method.
+						let implArgs = frame.localVariables.slice();
+						implArgs.unshift(this);
+						let result = frame.method.impl.apply(null, implArgs);
 						this.popFrame();
-						if (hasresult) {
+						if (!frame.method.descriptor.returnsVoid()) {
 							this.stack[0].operandStack.push(result);
 						}
 					} else {				
@@ -149,6 +154,8 @@ function KLThreadContext(bootstrapMethod) {
 			// 		    let str = Number(opcode).toString(16);
 			// 		    str = str.length == 1 ? "0x0" + str : "0x" + str;
 			// console.log("opcode " + str);
+
+			if (ShouldBreakOnInstruction(this)) { debugger; }
 
 			let handler = this.instructionHandlers[opcode];
 			if (!handler) {

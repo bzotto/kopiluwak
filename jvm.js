@@ -446,27 +446,23 @@ function bpfn(methodName) {
 	JavaBreakpoints.push({"methodName": methodName});
 }
 
-function BreakOnMethodStartIfNecessary(threadContext) {
+function ShouldBreakOnMethodStart(threadContext) {
 	if (JavaBreakpoints.length == 0) {
 		return;
 	}
 	let frame = threadContext.stack[0];
-	let fqmn = frame.method.jclass.name + "." + frame.method.name;
-	let hit = null;
+	let fqmn = frame.method.class.name + "." + frame.method.name;
 	for (let i = 0; i < JavaBreakpoints.length; i++) {
 		let bp = JavaBreakpoints[i];
 		if (bp.methodName != undefined && bp.methodName == fqmn) {
-			hit = bp;
+			return true;
 		}
 	}
 
-	if (hit) {
-		debugger;
-	}
-	
+	return false;
 }
 
-function BreakOnInstructionIfNecessary(threadContext) {
+function ShouldBreakOnInstruction(threadContext) {
 	if (JavaBreakpoints.length == 0) {
 		return;
 	}
@@ -474,7 +470,7 @@ function BreakOnInstructionIfNecessary(threadContext) {
 	let frame = threadContext.stack[0];
 	
 	// Is there a source file name?
-	let sourceFileName = frame.method.jclass.loadedClass.sourceFileName();
+	let sourceFileName = frame.method.class.sourceFileName();
 	if (!sourceFileName) {
 		return;
 	}
@@ -494,17 +490,14 @@ function BreakOnInstructionIfNecessary(threadContext) {
 	}
 	
 	// See if there's a matching breakpoint.
-	let hit = null;
 	for (let i = 0; i < JavaBreakpoints.length; i++) {
 		let bp = JavaBreakpoints[i];
 		if (bp.fileName != undefined && bp.fileName == sourceFileName && bp.lineNumber == lineNumber) {
-			hit = bp;
+			return true;
 		}
 	}
 	
-	if (hit) {
-		debugger;
-	}
+	return false;
 }
 
 function KLClassFromLoadedClass(loadedClass) {
@@ -517,8 +510,12 @@ function KLClassFromLoadedClass(loadedClass) {
 	// Find and patch in native bindings for this class.
 	let classImpls = KLNativeImpls[klclass.name];
 	if (classImpls) {
-		for (let methodIdentifier in klclass.vtable) {
+		for (let methodIdentifier in classImpls) {
+			let impl = classImpls[methodIdentifier];
 			let method = klclass.vtable[methodIdentifier];
+			if (method.impl != null) {
+				debugger;
+			}
 			if (!method.code && (method.access & ACC_NATIVE) != 0) {
 				method.impl = classImpls[methodIdentifier];
 			}
