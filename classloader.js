@@ -7,7 +7,7 @@
 //
 
 function KLLoadedClass(className, superclassName, accessFlags, constantPool, interfaces, fields, methods, attributes) {
-	this.className = className;
+	this.name = className;
 	this.superclassName = superclassName;
 	this.accessFlags = accessFlags;
 	this.constantPool = constantPool;

@@ -32,7 +32,7 @@ function KLThreadContext(bootstrapMethod) {
 				outgoingFrame.completionHandlers[i](outgoingFrame);
 			}
 		}
-		console.log("--> Exiting " + outgoingFrame.method.class.className + "." + outgoingFrame.method.name);
+		console.log("--> Exiting " + outgoingFrame.method.class.name + "." + outgoingFrame.method.name);
 		return outgoingFrame;
 	}
 	
@@ -53,7 +53,7 @@ function KLThreadContext(bootstrapMethod) {
 		if (!frame) {
 			return null;
 		}
-		return frame.method.class.className + "." + frame.method.name;
+		return frame.method.class.name + "." + frame.method.name;
 	}
 	
 	this.exec = function() {
@@ -82,7 +82,7 @@ function KLThreadContext(bootstrapMethod) {
 					// Nowhere left to throw... 
 					let jmessage = exception.fieldValsByClass["java.lang.Throwable"]["detailMessage"];
 					let message = jmessage ? JSStringFromJavaLangStringObj(jmessage) : "(unknown)";
-					console.log("JVM: Java thread terminated due to unhandled exception " + exception.class.className + ":\n\t" + message);
+					console.log("JVM: Java thread terminated due to unhandled exception " + exception.class.name + ":\n\t" + message);
 					return; 
 				}
 				
@@ -121,7 +121,7 @@ function KLThreadContext(bootstrapMethod) {
 							this.stack[0].operandStack.push(result);
 						}
 					} else {				
-						console.log("JVM: Eliding native method " + frame.method.class.className + "." + frame.method.name + " (desc: " + frame.method.descriptor.descriptorString() + ")");
+						console.log("JVM: Eliding native method " + frame.method.class.name + "." + frame.method.name + " (desc: " + frame.method.descriptor.descriptorString() + ")");
 						let nativeFrame = this.popFrame();
 						if (!nativeFrame.method.descriptor.returnsVoid()) {
 							let returnType = nativeFrame.method.descriptor.returnType();
@@ -385,7 +385,7 @@ function KLThreadContext(bootstrapMethod) {
 			return;
 		}
 		if ((field.access & ACC_FINAL) != 0) {
-			if (fieldRef.className != frame.method.class.className || 
+			if (fieldRef.className != frame.method.class.name || 
 				method.name != "<init>") {
 				thread.throwException("java.lang.IllegalAccessError");
 			}
@@ -546,8 +546,8 @@ function KLThreadContext(bootstrapMethod) {
 		// will ensure that, for example, a method on Object is not chosen incorectly becaue it is 
 		// the ancestor of *both* the object's class and the current method's classe. 
 		let contextClass = jobj.class;
-		if ((jobj.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(jobj.class.className, frame.method.class.className)) && 
-			IsClassASubclassOf(frame.method.class.className, methodRef.className)) {
+		if ((jobj.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(jobj.class.name, frame.method.class.name)) && 
+			IsClassASubclassOf(frame.method.class.name, methodRef.className)) {
 			contextClass = null;
 		}
 		let method = ResolveMethodReference(methodRef, contextClass);  
@@ -1297,32 +1297,32 @@ function KLThreadContext(bootstrapMethod) {
 		
 		if (S.isOrdinaryClass()) {
 			if (T.isOrdinaryClass()) {
-				if ((S.className == T.className) || IsClassASubclassOf(S.className, T.className)) {
+				if ((S.name == T.name) || IsClassASubclassOf(S.name, T.name)) {
 					return true;
 				}
 			} else if (T.isInterfaceType()) {
-				if (S.implementsInterface(T.className)) {
+				if (S.implementsInterface(T.name)) {
 					return true;
 				}
 			}
 		} else if (S.isInterface()) {
 			if (T.isOrdinaryClass()) {
-				if (T.className == "java.lang.Object") {
+				if (T.name == "java.lang.Object") {
 					return true;
 				} 
 			} else if (T.isInterface()) {
-				if ((S.className == T.className) || IsClassASubclassOf(S.className, T.className)) {
+				if ((S.name == T.name) || IsClassASubclassOf(S.name, T.name)) {
 					return true;
 				}
 			}
 		} else if (S.isArray()) {
 			let SC = S.arrayComponentType();
 			if (T.isOrdinaryClass()) {
-				if (T.className == "java.lang.Object") {
+				if (T.name == "java.lang.Object") {
 					return true;
 				} 
 			} else if (T.isInterface()) {
-				if (S.implementsInterface(T.className)) {
+				if (S.implementsInterface(T.name)) {
 					return true;
 				}
 			} else if (T.isArray()) {

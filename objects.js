@@ -28,13 +28,13 @@ function JObj(klclass) {
 	// Set up the field val class buckets and their default values.
 	let currentClass = klclass;
 	do {
-		this.fieldValsByClass[currentClass.className] = {};
+		this.fieldValsByClass[currentClass.name] = {};
 		for (let fieldName in currentClass.fields) {
 			let fieldAccess = currentClass.fields[fieldName].access;
 			if ((fieldAccess & ACC_STATIC) == 0) {
 				let fieldType = currentClass.fields[fieldName].type;
 				let fieldVal = DefaultValueForType(fieldType);
-				this.fieldValsByClass[currentClass.className][fieldName] = fieldVal;
+				this.fieldValsByClass[currentClass.name][fieldName] = fieldVal;
 			}
 		}
 		currentClass = currentClass.superclass;
@@ -136,8 +136,10 @@ const KLCLASS_STATE_INITIALIZING  = 1;
 const KLCLASS_STATE_INITIALIZED   = 2;
 
 function KLClass(loadedOrArrayClass, superclass) {
+	// superclass can also be a superinterface
 	this.superclass = superclass;
-	this.className = loadedOrArrayClass.className;
+	// "name" is either a class or interface name, or if this class represents an array, it is in descriptor format.
+	this.name = loadedOrArrayClass.name;   
 	this.superclassName = loadedOrArrayClass.superclassName;
 	this.accessFlags = loadedOrArrayClass.accessFlags;
 	
@@ -156,12 +158,12 @@ function KLClass(loadedOrArrayClass, superclass) {
 	this.attributes = loadedOrArrayClass.attributes;
 		
 	
-	this.isArray = function() { return this.className[0] == "["; }
+	this.isArray = function() { return this.name[0] == "["; }
 	this.isInterface = function() { return (this.accessFlags & ACC_INTERFACE) != 0; }
 	if (this.isArray()) {
-		this.typeOfInstances = new JType(this.className);
+		this.typeOfInstances = new JType(this.name);
 	} else {
-		this.typeOfInstances = new JType("L" + this.className + ";");
+		this.typeOfInstances = new JType("L" + this.name + ";");
 		if (this.isInterface()) {
 			this.typeOfInstances.setIsInterface();
 		}		
@@ -266,7 +268,7 @@ function KLClass(loadedOrArrayClass, superclass) {
 	// Set up the field val class buckets.
 	let curclass = this;
 	do {
-		this.fieldValsByClass[curclass.className] = {};
+		this.fieldValsByClass[curclass.name] = {};
 		curclass = curclass.superclass;
  	} while (curclass);
 	
@@ -338,7 +340,7 @@ function KLClass(loadedOrArrayClass, superclass) {
 			if ((fieldAccess & ACC_STATIC) != 0) {
 				let fieldType = currentClass.fields[fieldName].type;
 				let fieldVal = DefaultValueForType(fieldType);
-				this.fieldValsByClass[currentClass.className][fieldName] = fieldVal;
+				this.fieldValsByClass[currentClass.name][fieldName] = fieldVal;
 			}
 		}
 		currentClass = currentClass.superclass;

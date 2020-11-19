@@ -20,14 +20,14 @@ function AddClass(klclass) {
 		let superclass = ResolveClass(klclass.superclassName);
 	
 		if (!superclass) {
-			console.log("JVM: Cannot load " + klclass.className + " before superclass " + klclass.superclassName);
+			console.log("JVM: Cannot load " + klclass.name + " before superclass " + klclass.superclassName);
 			return;
 		}
 	
 		klclass.superclass = superclass;
 	}
 	LoadedClasses.push(klclass);	
-	console.log("JVM: Loaded class " + klclass.className);
+	console.log("JVM: Loaded class " + klclass.name);
 }
 
 function LoadClassFromJDK(className) {
@@ -75,7 +75,7 @@ function CreateArrayClassWithAttributes(componentClass, dimensions) {
 	for (let i = 0; i < dimensions; i++) {
 		descStr += "[";
 	}
-	descStr += ("L" + componentClass.className + ";");
+	descStr += ("L" + componentClass.name + ";");
 	return CreateArrayClassFromName(descStr);
 }
 	
@@ -86,7 +86,7 @@ function ResolveClass(className) {
 	
 	for (var i = 0; i < LoadedClasses.length; i++) {
 		var loadedClass = LoadedClasses[i];
-		if (loadedClass.className == className) {
+		if (loadedClass.name == className) {
 			return loadedClass;
 		}
 	}
@@ -129,7 +129,7 @@ function JavaLangStringObjForJSString(jsStr) {
 }
 
 function JSStringFromJavaLangStringObj(jobj) {
-	if (jobj.class.className != "java.lang.String") {
+	if (jobj.class.name != "java.lang.String") {
 		debugger;
 	}
 	let arrayref = jobj.fieldValsByClass["java.lang.String"]["value"];
@@ -141,7 +141,7 @@ function JSStringFromJavaLangStringObj(jobj) {
 }
 
 function JavaLangClassObjForClass(klclass) {
-	let jclass = ClassesToJavaLangClass[klclass.className];
+	let jclass = ClassesToJavaLangClass[klclass.name];
 	if (!jclass) {
 		let classClass = ResolveClass("java.lang.Class");
 		if (!classClass) {
@@ -150,9 +150,9 @@ function JavaLangClassObjForClass(klclass) {
 		}
 		jclass = classClass.createInstance();
 		// Set the referenced class name. [!] This is supposed to be set by native method initClassName.
-		jclass.fieldValsByClass["java.lang.Class"]["name"] = JavaLangStringObjForJSString(klclass.className);
+		jclass.fieldValsByClass["java.lang.Class"]["name"] = JavaLangStringObjForJSString(klclass.name);
 		jclass.meta["classClass"] = klclass;
-		ClassesToJavaLangClass[klclass.className] = jclass;
+		ClassesToJavaLangClass[klclass.name] = jclass;
 	}
 	return jclass;
 }
@@ -182,7 +182,7 @@ function IsClassASubclassOf(className1, className2) {
 	
 	let superclass = targetClass.superclass;
 	while (superclass) {
-		if (superclass.className == className2) {
+		if (superclass.name == className2) {
 			return true;
 		}
 		superclass = superclass.superclass;
@@ -287,13 +287,13 @@ function Signed16bitValFromTwoBytes(val1, val2) {
 }
 
 function ObjectIsA(jobj, className) {
-	if (jobj.class.className == className) {
+	if (jobj.class.name == className) {
 		return true;
 	}
-	if (IsClassASubclassOf(jobj.class.className, className)) {
+	if (IsClassASubclassOf(jobj.class.name, className)) {
 		return true;
 	}
-	if (DoesClassImplementInterface(jobj.class.className, className)) {
+	if (DoesClassImplementInterface(jobj.class.name, className)) {
 		return true;
 	}
 	return false;
@@ -389,7 +389,7 @@ function DebugBacktrace(threadContext) {
 		// Is there a source file name?
 		let sourceFileName = frame.method.class.sourceFileName();
 		
-		let fqmn = frame.method.class.className + "." + frame.method.name;
+		let fqmn = frame.method.class.name + "." + frame.method.name;
 		if (!sourceFileName) {
 			sourceFileName = "unknown";
 		}
@@ -438,17 +438,6 @@ function CreateObjInitFrameIfNeeded(jobj) {
 	return new KLStackFrame(initMethod);
 }
 
-function PopVmStackFrame(threadContext, isNormal) {
-	let outgoingFrame = threadContext.stack.shift();
-	if (isNormal) {
-		for (let i = 0; i < outgoingFrame.completionHandlers.length; i++) {
-			outgoingFrame.completionHandlers[i](outgoingFrame);
-		}
-	}
-	console.log("--> Exiting " + outgoingFrame.method.jclass.className + "." + outgoingFrame.method.name);
-	return outgoingFrame;
-}
-
 function bp(filename, ln) {
 	JavaBreakpoints.push({"fileName": filename, "lineNumber": ln});
 }
@@ -462,7 +451,7 @@ function BreakOnMethodStartIfNecessary(threadContext) {
 		return;
 	}
 	let frame = threadContext.stack[0];
-	let fqmn = frame.method.jclass.className + "." + frame.method.name;
+	let fqmn = frame.method.jclass.name + "." + frame.method.name;
 	let hit = null;
 	for (let i = 0; i < JavaBreakpoints.length; i++) {
 		let bp = JavaBreakpoints[i];
@@ -526,7 +515,7 @@ function KLClassFromLoadedClass(loadedClass) {
 	let klclass = new KLClass(loadedClass, superclass);
 	
 	// Find and patch in native bindings for this class.
-	let classImpls = KLNativeImpls[klclass.className];
+	let classImpls = KLNativeImpls[klclass.name];
 	if (classImpls) {
 		for (let methodIdentifier in klclass.vtable) {
 			let method = klclass.vtable[methodIdentifier];
