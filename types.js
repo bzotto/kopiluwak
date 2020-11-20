@@ -302,7 +302,6 @@ function KLMethodDescriptor(descriptorString) {
 		return this.return;
 	}
 	
-	
 	//
 	// Construction
 	//

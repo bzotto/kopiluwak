@@ -194,19 +194,9 @@ function IsClassASubclassOf(className1, className2) {
 function DoesClassImplementInterface(className, interfaceName) {
 	let startClass = ResolveClass(className);
 	if (!startClass) {
-		//??
-		return false;
+		debugger;
 	}
-	
-	
-	let targetClass = startClass;
-	while (targetClass) {
-		if (targetClass.implementsInterface(interfaceName)) {
-			return true;
-		}
-		targetClass = targetClass.superclass;
-	}
-	return false;
+	return startClass.implementsInterface(interfaceName);
 }
 
 function ResolveMethodReference(methodRef, contextClass) {

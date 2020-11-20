@@ -200,7 +200,11 @@ function KLClass(loadedOrArrayClass, superclass) {
 				return true;
 			}
 		}
-		return false;
+		if (this.superclass) {
+			return this.superclass.implementsInterface(interfaceName);
+		} else {
+			return false;
+		}
 	}
 	
 	this.methodReferenceFromIndex = function(index) {

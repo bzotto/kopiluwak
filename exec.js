@@ -118,8 +118,13 @@ function KLThreadContext(bootstrapMethod) {
 						// Marshal the thread context and arguments for the native implementation. 
 						// First argument to an internal implementation is always the KLThreadContext, followed by the 
 						// normal Java-land args for the method.
-						let implArgs = frame.localVariables.slice();
-						implArgs.unshift(this);
+						let implArgs = [this];
+						for (let i = 0; i < frame.localVariables.length; i++) {
+							implArgs.push(frame.localVariables[i]);
+							if (frame.localVariables[i].isa.isCategory2ComputationalType()) {
+								i++; // Drop the redundant long/double args from the native calls arg list.
+							}
+						}						
 						let result = frame.method.impl.apply(null, implArgs);
 						this.popFrame();
 						if (!frame.method.descriptor.returnsVoid()) {
@@ -519,12 +524,46 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	function PrepareArgumentsByRemovingFromStackForMethod(stack, methodRef) {
+		let args = [];
+		let descriptor = new KLMethodDescriptor(methodRef.descriptor);
+		let narg = descriptor.argumentCount();
+		// Walk backwards 
+		for (let i = (narg-1); i >= 0; i--) {
+			let argType = descriptor.argumentTypeAtIndex(i);
+			if (stack.length < 1) {
+				return null;
+			}
+			let value = stack.pop();
+			if (!TypeIsAssignableToType(value.isa, argType)) {
+				debugger;
+				return null;
+			}
+			args.unshift(value);
+			// Longs and double get added twice, 
+			if (argType.isCategory2ComputationalType()) {
+				args.unshift(value);
+			}
+		}
+		return args;
+	}
+	
 	this.instructionHandlers[INSTR_invokestatic] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
 		let methodRef = frame.method.class.methodReferenceFromIndex(index);
 		let method = ResolveMethodReference(methodRef, null);  // what's the right class param here?
-		let argsCount = method.descriptor.argumentCount();
-		let args = frame.operandStack.splice(argsCount * -1.0, argsCount);
+		if (!AccessFlagIsSet(method.access, ACC_STATIC)) {
+			thread.throwException("java.lang.IncompatibleClassChangeError");
+			return;
+		}
+		if (AccessFlagIsSet(method.access, ACC_NATIVE) && !method.impl) {
+			thread.throwException("java.lang.UnsatisfiedLinkError");
+			return;
+		}
+		args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, methodRef);
+		if (args == null) {
+			debugger;
+		}
 		let childFrame = new KLStackFrame(method);		
 		childFrame.localVariables = args;
 		IncrementPC(frame, 3);
@@ -534,12 +573,12 @@ function KLThreadContext(bootstrapMethod) {
 	const instr_invokevirtual = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
 		let methodRef = frame.method.class.methodReferenceFromIndex(index);
-		// Build descriptor so we know how many arguments there are.
-		let methodDesc = new KLMethodDescriptor(methodRef.descriptor);
-		let argsCount = methodDesc.argumentCount();
-		let args = frame.operandStack.splice(argsCount * -1.0, argsCount);
-		let jobj = frame.operandStack.pop();
-		args.unshift(jobj);
+		let args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, methodRef);
+		if (args == null) {
+			debugger;
+		}
+		let objectref = frame.operandStack.pop();
+		args.unshift(objectref);
 		// Generally, we want to invoke the named method on the object given, meaning by 
 		// looking directly at its class's vtable and using whatever matching entry we find, even
 		// if it reflects an override in a subclass from what is actually referenced. The only
@@ -552,8 +591,8 @@ function KLThreadContext(bootstrapMethod) {
 		// object is the type of (or a subclass of the class of) the currently-executing method. That
 		// will ensure that, for example, a method on Object is not chosen incorectly becaue it is 
 		// the ancestor of *both* the object's class and the current method's classe. 
-		let contextClass = jobj.class;
-		if ((jobj.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(jobj.class.name, frame.method.class.name)) && 
+		let contextClass = objectref.class;
+		if ((objectref.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(objectref.class.name, frame.method.class.name)) && 
 			IsClassASubclassOf(frame.method.class.name, methodRef.className)) {
 			contextClass = null;
 		}
@@ -565,6 +604,54 @@ function KLThreadContext(bootstrapMethod) {
 	}
 	this.instructionHandlers[INSTR_invokevirtual] = instr_invokevirtual;
 	this.instructionHandlers[INSTR_invokespecial] = instr_invokevirtual;
+		
+	this.instructionHandlers[INSTR_invokeinterface] = function(frame, opcode, thread) {
+		let index = U16FromInstruction(frame);
+		let count = U8FromInstruction(frame, 3);
+		let methodRef = frame.method.class.methodReferenceFromIndex(index);
+		if (!methodRef.isInterface) {
+			debugger;
+		}
+		let args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, methodRef);
+		if (args == null) {
+			debugger; // static type safety error or internal stack management error.
+		}
+		let objectref = frame.operandStack.pop();
+		args.unshift(objectref);
+		if (objectref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return;
+		}
+		if (!objectref.isa.isOrdinaryClass() && !objectref.isa.isArray()) {
+			debugger;
+		}
+		if (!objectref.class.implementsInterface(methodRef.className)) {
+			thread.throwException("java.lang.IncompatibleClassChangeError");
+			return;
+		}		
+		// XXX Resolve. This doesn't really implment step 3 lookup. 
+		let method = ResolveMethodReference(methodRef, objectref.class);
+		if (!method) {
+			thread.throwException("java.lang.AbstractMethodError");
+			return;
+		}
+		if (!AccessFlagIsSet(method.access, ACC_PUBLIC)) {
+			thread.throwException("java.lang.IllegalAccessError");
+			return;	
+		}
+		if (AccessFlagIsSet(method.access, ACC_ABSTRACT)) {
+			thread.throwException("java.lang.AbstractMethodError");
+			return;	
+		}
+		if (AccessFlagIsSet(method.access, ACC_NATIVE) && !method.impl) {
+			thread.throwException("java.lang.UnsatisfiedLinkError");
+			return;	
+		}
+		let childFrame = new KLStackFrame(method);		
+		childFrame.localVariables = args;
+		IncrementPC(frame, 5);
+		thread.pushFrame(childFrame);
+	}
 	
 	const instr_aload_n = function(frame, opcode) {
 		let n = opcode - INSTR_aload_0;
