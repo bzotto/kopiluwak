@@ -25,12 +25,20 @@ KLNativeImpls["java.lang.Class"] = {
 	"getPrimitiveClass#(Ljava.lang.String;)Ljava.lang.Class;": function(thread, nameObj) {
 		let primitiveName = JSStringFromJavaLangStringObj(nameObj);
 		return JavaLangClassObjForPrimitive(primitiveName);
+	},
+	"isPrimitive#()Z": function(thread, classObj) {
+		let primitiveName = classObj.meta.primitiveName;
+		if (primitiveName) {
+			return new JInt(1);
+		} else {
+			return new JInt(0);
+		}
 	}
 };
 
 KLNativeImpls["java.lang.Object"] = {
 	"getClass#()Ljava.lang.Class;": function(thread, jobj) {
-		return JavaLangClassObjForClass(jobj.jclass);
+		return JavaLangClassObjForClass(jobj.class);
 	},
 	"hashCode#()I": function() {
 		return new JInt(1);
@@ -44,13 +52,59 @@ KLNativeImpls["java.lang.System"] = {
 		let nanoseconds = Math.trunc(milliseconds * 1000000);
 		let int64 = KLInt64FromNumber(nanoseconds);
 		return new JLong(int64);
+	},
+	"arraycopy#(Ljava.lang.Object;ILjava.lang.Object;II)V": function(thread, src, srcPos, dest, destPos, llength) {
+		if (src.isa.isNull() || dest.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException");
+			return; 
+		}
+		if (!src.isa.isArray() || !dest.isa.isArray()) {
+			thread.throwException("java.lang.ArrayStoreException");
+			return; 
+		}
+		if (!TypeIsAssignableToType(dest.isa.arrayComponentType(), src.isa.arrayComponentType())) {
+			thread.throwException("java.lang.ArrayStoreException");
+			return; 
+		}
+		let srcPosInt = srcPos.val;
+		let destPosInt = destPos.val;
+		let lengthInt = llength.val;
+		if (srcPosInt < 0 || destPosInt < 0 || srcPosInt+lengthInt > src.count || destPosInt+lengthInt > dest.count) {
+			thread.throwException("java.lang.IndexOutOfBoundsException");
+			return; 
+		}
+		// Copy through intermediate which ensures correctness when src and dest are same. Obviously it's
+		// not necessary in other cases. But who cares.
+		let intermediate = []; 
+		for (let i = 0; i < lengthInt; i++) {
+			intermediate[i] = (src.elements[srcPosInt + i]);
+		}
+		for (let i = 0; i < lengthInt; i++) {
+			dest.elements[destPosInt + i] = intermediate[i];
+		}
+	}
+};
+
+KLNativeImpls["java.lang.Runtime"] = {
+	"availableProcessors#()I": function() {
+		return new JInt(1);
+	}
+};
+
+KLNativeImpls["java.lang.Thread"] = {
+	"registerNatives#()V": function() {	},
+	"currentThread#()Ljava.lang.Thread;": function(thread) {
+		return thread.currentJavaLangThreadObject();
+	}, 
+	"isAlive#()Z": function() {
+		return new JInt(1);
 	}
 };
 
 KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 	"vmProperties#()[Ljava.lang.String;": function() { 
 		let arrayClass = ResolveClass("[Ljava.lang.String;");
-		let arr = new JArray(strClass, 4);
+		let arr = new JArray(arrayClass, 4);
 		arr.elements[0] = JavaLangStringObjForJSString("java.home");
 		arr.elements[1] = JavaLangStringObjForJSString("/");
 		return arr;
@@ -60,7 +114,7 @@ KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 		// let propsRawClass = ResolveClass("jdk.internal.util.SystemProps$Raw");
 		// let maxPropsValue = propsRawClass.fieldValsByClass["jdk.internal.util.SystemProps$Raw"]["FIXED_LENGTH"];
 		let arrayClass = ResolveClass("[Ljava.lang.String;");
-		return new JArray(strClass, 42);
+		return new JArray(arrayClass, 42);
 	}
 };
 
@@ -76,6 +130,7 @@ KLNativeImpls["jdk.internal.misc.VM"] = {
 };
 
 KLNativeImpls["jdk.internal.misc.Unsafe"] = {
+	"registerNatives#()V": function() {	},
 	"arrayBaseOffset0#(Ljava.lang.Class;)I": function() {
 		return new JInt(0);
 	},
@@ -105,6 +160,18 @@ KLNativeImpls["java.lang.Double"] = {
 		let d = fromIEEE754Double(bytes);
 		return new JDouble(d);
 	}	
+};
+
+KLNativeImpls["java.lang.StringUTF16"] = {
+	"isBigEndian#()Z": function() {
+		return new JInt(1);
+	}
+};
+
+KLNativeImpls["java.security.AccessController"] = {
+	"getStackAccessControlContext#()Ljava.security.AccessControlContext;": function() {
+		return new JNull(); // ???
+	}
 };
 
 KLNativeImpls["jdk.internal.reflect.Reflection"] = {

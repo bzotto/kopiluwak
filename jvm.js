@@ -110,16 +110,15 @@ function ResolveClass(className) {
 	return null;
 }
 
-function JavaLangStringObjForJSString(jsStr) {
-	let bytes = [];
-    for (let i = 0; i < jsStr.length; i++) {
-		let intobj = new JInt(jsStr.charCodeAt(i));
-        bytes.push(intobj);
+function JavaLangStringObjForUTF16Bytes(bytes) {
+	let ints = [];
+    for (let i = 0; i < bytes.length; i++) {
+		let intobj = new JInt(bytes[i]);
+        ints.push(intobj);
     }
-	
 	let arrayClass = ResolveClass("[B");
-	let byteArray = new JArray(arrayClass, bytes.length);
-	byteArray.elements = bytes;
+	let byteArray = new JArray(arrayClass, ints.length);
+	byteArray.elements = ints;
 	let stringClass = ResolveClass("java.lang.String");
 	stringObj = stringClass.createInstance();
 	stringObj.fieldValsByClass["java.lang.String"]["value"] = byteArray;
@@ -128,7 +127,17 @@ function JavaLangStringObjForJSString(jsStr) {
 	return stringObj;
 }
 
+function JavaLangStringObjForJSString(jsStr) {
+	let bytes = [];
+    for (let i = 0; i < jsStr.length; i++) {
+        bytes.push(jsStr.charCodeAt(i));
+    }
+	return JavaLangStringObjForUTF16Bytes(bytes);
+}
+
 function JSStringFromJavaLangStringObj(jobj) {
+	if (!jobj || !jobj.class) { debugger; }
+	
 	if (jobj.class.name != "java.lang.String") {
 		debugger;
 	}
@@ -141,6 +150,8 @@ function JSStringFromJavaLangStringObj(jobj) {
 }
 
 function JavaLangClassObjForClass(klclass) {
+	if (!klclass) { debugger; }
+	
 	let jclass = ClassesToJavaLangClass[klclass.name];
 	if (!jclass) {
 		let classClass = ResolveClass("java.lang.Class");
@@ -168,6 +179,7 @@ function JavaLangClassObjForPrimitive(primitiveStr) {
 		jclass = classClass.createInstance();
 		// Set the referenced class name. [!] This is supposed to be set by native method initClassName.
 		jclass.fieldValsByClass["java.lang.Class"]["name"] = JavaLangStringObjForJSString(primitiveStr);
+		jclass.meta["primitiveName"] = primitiveStr;
 		PrimitivesToJavaLangClass[primitiveStr] = jclass;
 	}
 	return jclass;
@@ -317,17 +329,26 @@ function TypeIsAssignableToType(origin, dest) {
 		}
 		return TypeIsAssignableToType(origin.arrayComponentType(), dest.arrayComponentType());
 	} else if (dest.isClass()) {
-		if (!origin.isClass()) {
+		if (!origin.isClass() && !origin.isArray()) {
 			return false;
 		}
 		if (origin.className() == dest.className()) {
 			return true;
 		}
-		if (IsClassASubclassOf(origin.className(), dest.className())) {
-			return true;
-		}
-		if (DoesClassImplementInterface(origin.className(), dest.className())) {
-			return true;
+		if (origin.isClass()) {
+			if (IsClassASubclassOf(origin.className(), dest.className())) {
+				return true;
+			}
+			if (DoesClassImplementInterface(origin.className(), dest.className())) {
+				return true;
+			}
+		} else if (origin.isArray()) {
+			if (IsClassASubclassOf(origin.descriptorString(), dest.className())) {
+				return true;
+			}
+			if (DoesClassImplementInterface(origin.descriptorString(), dest.className())) {
+				return true;
+			}
 		}
 		return false;
 	} else {
@@ -546,11 +567,11 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	// InjectOutputMockObjects();
 	
 	//Create the VM startup thread.
-	// let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
-	// if (initPhase1Method) {
-	// 	let ctx = new KLThreadContext(initPhase1Method);
-	// 	ctx.exec();
-	// }
+	let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
+	if (initPhase1Method) {
+		let ctx = new KLThreadContext(initPhase1Method);
+		ctx.exec();
+	}
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();

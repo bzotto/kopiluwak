@@ -189,3 +189,12 @@ function KLInt64BitwiseAnd(int1, int2) {
 	}
 	return new KLInt64(output);
 }
+
+function KLInt64BitwiseOr(int1, int2) {
+	let output = [];
+	for (let i = 0; i < 8; i++) {
+		let byte = int1.storage[i] | int2.storage[i];
+		output[i] = byte;
+	}
+	return new KLInt64(output);
+}

@@ -16,6 +16,7 @@ function KLStackFrame(method) {
 function KLThreadContext(bootstrapMethod) {
 
 	this.stack = [];
+	this.javaThreadObj = null;
 	
 	this.pushFrame = function(frame) {
 		this.stack.unshift(frame);
@@ -32,7 +33,7 @@ function KLThreadContext(bootstrapMethod) {
 				outgoingFrame.completionHandlers[i](outgoingFrame);
 			}
 		}
-		console.log("--> Exiting " + outgoingFrame.method.class.name + "." + outgoingFrame.method.name);
+		// console.log("--> Exiting " + outgoingFrame.method.class.name + "." + outgoingFrame.method.name);
 		return outgoingFrame;
 	}
 	
@@ -54,6 +55,23 @@ function KLThreadContext(bootstrapMethod) {
 			return null;
 		}
 		return frame.method.class.name + "." + frame.method.name;
+	}
+	
+	this.currentJavaLangThreadObject = function() {
+		if (!this.javaThreadObj) {
+			let klclass = ResolveClass("java.lang.Thread");
+			this.javaThreadObj = klclass.createInstance();
+			this.javaThreadObj.fieldValsByClass["java.lang.Thread"]["name"] = JavaLangStringObjForJSString("Thread-main");
+			this.javaThreadObj.state = JOBJ_STATE_INITIALIZED;
+			
+			klclass = ResolveClass("java.lang.ThreadGroup");
+			let threadGroup = klclass.createInstance();
+			threadGroup.fieldValsByClass["java.lang.ThreadGroup"]["name"] = JavaLangStringObjForJSString("system");
+			threadGroup.fieldValsByClass["java.lang.ThreadGroup"]["maxPriority"] = new JInt(10);
+			threadGroup.state = JOBJ_STATE_INITIALIZED;
+			this.javaThreadObj.fieldValsByClass["java.lang.Thread"]["group"] = threadGroup;				
+		}
+		return this.javaThreadObj;
 	}
 	
 	this.exec = function() {
@@ -81,7 +99,7 @@ function KLThreadContext(bootstrapMethod) {
 				} else {
 					// Nowhere left to throw... 
 					let jmessage = exception.fieldValsByClass["java.lang.Throwable"]["detailMessage"];
-					let message = jmessage ? JSStringFromJavaLangStringObj(jmessage) : "(unknown)";
+					let message = (jmessage && !jmessage.isa.isNull()) ? JSStringFromJavaLangStringObj(jmessage) : "(unknown)";
 					console.log("JVM: Java thread terminated due to unhandled exception " + exception.class.name + ":\n\t" + message);
 					return; 
 				}
@@ -102,7 +120,7 @@ function KLThreadContext(bootstrapMethod) {
 					continue;
 				}
 				
-				// console.log("Entering -> " + this.currentFQMethodName());
+				 console.log("Entering -> " + this.currentFQMethodName());
 				
 				if (ShouldBreakOnMethodStart(this)) { debugger; }
 				
@@ -126,9 +144,12 @@ function KLThreadContext(bootstrapMethod) {
 							}
 						}						
 						let result = frame.method.impl.apply(null, implArgs);
-						this.popFrame();
-						if (!frame.method.descriptor.returnsVoid()) {
-							this.stack[0].operandStack.push(result);
+						if (!frame.pendingException) {
+							// Pop this frame and result the result *unless* the native impl threw an exception.
+							this.popFrame();
+							if (!frame.method.descriptor.returnsVoid()) {
+								this.stack[0].operandStack.push(result);
+							}
 						}
 					} else {				
 						console.log("JVM: Eliding native method " + frame.method.class.name + "." + frame.method.name + " (desc: " + frame.method.descriptor.descriptorString() + ")");
@@ -271,28 +292,7 @@ function KLThreadContext(bootstrapMethod) {
 				{
 					let strconst = frame.method.class.constantPool[constref.string_index];
 					let strbytes = strconst.bytes;
-					// Create a string object to wrap the literal.
-					let arrClass = ResolveClass("[I");
-					let arrobj = new JArray(arrClass, strbytes.length);
-					for (let i = 0; i < strbytes.length; i++) {
-						arrobj.elements[i] = new JInt(strbytes[i]);
-					}
-					let strclass = ResolveClass("java.lang.String");
-					let strobj = strclass.createInstance();
-					// Rig the current frame and the child completion to land on the next instruction with the 
-					// stack looking right.
-					let initMethod = ResolveMethodReference({"className": "java.lang.String", "methodName": "<init>", "descriptor": "([III)V"});
-					let initFrame = new KLStackFrame(initMethod);
-					initFrame.localVariables.push(strobj);
-					initFrame.localVariables.push(arrobj);
-					initFrame.localVariables.push(new JInt(0));
-					initFrame.localVariables.push(new JInt(arrobj.count));
-					initFrame.completionHandlers.push(function() { 
-						strobj.state = JOBJ_STATE_INITIALIZED;
-					});
-					frame.operandStack.push(strobj); // by the time the string init returns, this should be set up.
-					IncrementPC(frame, instlen);
-					thread.pushFrame(initFrame);
+					val = JavaLangStringObjForUTF16Bytes(strbytes);
 					break;
 				}
 			case CONSTANT_Integer:
@@ -591,6 +591,7 @@ function KLThreadContext(bootstrapMethod) {
 		// object is the type of (or a subclass of the class of) the currently-executing method. That
 		// will ensure that, for example, a method on Object is not chosen incorectly becaue it is 
 		// the ancestor of *both* the object's class and the current method's classe. 
+		if (!objectref || !objectref.class) { debugger; }
 		let contextClass = objectref.class;
 		if ((objectref.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(objectref.class.name, frame.method.class.name)) && 
 			IsClassASubclassOf(frame.method.class.name, methodRef.className)) {
@@ -701,6 +702,15 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_dreturn] = function(frame, opcode, thread) {
 		let value = frame.operandStack.pop();
 		if (!value.isa.isDouble() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isDouble())  {
+			debugger;
+		}
+		thread.popFrame();
+		thread.stack[0].operandStack.push(value);
+	}
+	
+	this.instructionHandlers[INSTR_lreturn] = function(frame, opcode, thread) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isLong() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isLong())  {
 			debugger;
 		}
 		thread.popFrame();
@@ -1308,6 +1318,18 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	this.instructionHandlers[INSTR_fadd] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isFloat() || !value2.isa.isFloat()) {
+			debugger;
+		}				
+		let floatResult = value1.val + value2.val;
+		let result = new JFloat(floatResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
 	this.instructionHandlers[INSTR_fmul] = function(frame) {
 		let value2 = frame.operandStack.pop();
 		let value1 = frame.operandStack.pop();
@@ -1315,6 +1337,18 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}				
 		let floatResult = value1.val * value2.val;
+		let result = new JFloat(floatResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_fdiv] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isFloat() || !value2.isa.isFloat()) {
+			debugger;
+		}				
+		let floatResult = value1.val / value2.val;
 		let result = new JFloat(floatResult);
 		frame.operandStack.push(result);
 		IncrementPC(frame, 1);
@@ -1394,7 +1428,7 @@ function KLThreadContext(bootstrapMethod) {
 				if ((S.name == T.name) || IsClassASubclassOf(S.name, T.name)) {
 					return true;
 				}
-			} else if (T.isInterfaceType()) {
+			} else if (T.isInterface()) {
 				if (S.implementsInterface(T.name)) {
 					return true;
 				}
@@ -1545,6 +1579,19 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	this.instructionHandlers[INSTR_lushr] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isInt()) {
+			debugger;
+		}
+		let s = value2.val & 0x3F;
+		let int64 = value1.val;
+		let result = new JLong(KLInt64ShiftRight(int64, s));
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
 	this.instructionHandlers[INSTR_ladd] = function(frame) {
 		let value2 = frame.operandStack.pop();
 		let value1 = frame.operandStack.pop();
@@ -1552,6 +1599,18 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		let longResult = KLInt64Add(value1.val, value2.val);
+		let result = new JLong(longResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_lsub] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isLong()) {
+			debugger;
+		}
+		let longResult = KLInt64Subtract(value1.val, value2.val);
 		let result = new JLong(longResult);
 		frame.operandStack.push(result);
 		IncrementPC(frame, 1);
@@ -1604,6 +1663,39 @@ function KLThreadContext(bootstrapMethod) {
 		let longResult = KLInt64BitwiseAnd(value1.val, value2.val);
 		let result = new JLong(longResult);
 		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_lor] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isLong() || !value2.isa.isLong()) {
+			debugger;
+		}
+		let longResult = KLInt64BitwiseOr(value1.val, value2.val);
+		let result = new JLong(longResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_monitorenter] = function(frame) {
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType()) {
+			debugger;
+		}
+		objectref.monitor++;
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_monitorexit] = function(frame) {
+		let objectref = frame.operandStack.pop();
+		if (!objectref.isa.isReferenceType()) {
+			debugger;
+		}
+		objectref.monitor--;
+		if (objectref.monitor < 0) {
+			debugger;
+		}
 		IncrementPC(frame, 1);
 	}
 }
