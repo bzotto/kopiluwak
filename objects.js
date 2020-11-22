@@ -266,6 +266,24 @@ function KLClass(loadedOrArrayClass, superclass) {
 	}
 	
 	//
+	// Support for jdk.internal.misc.Unsafe
+	//
+	
+	this.unsafeOffsetForInstanceField = function(fieldName) {
+		// NB This only searches this specific class and no superclasses. It's not obvious to me
+		// whether it's supposed to. So for now it's narrow, and will blow up with an execption should
+		// valid code ever try to get an offset for a field that is not here.
+		let allFields = Object.keys(this.fields);
+		for (let i = 0; i < allFields.length; i++) {
+			let field = this.fields[allFields[i]];
+			if (!AccessFlagIsSet(field.access, ACC_STATIC) && allFields[i] == fieldName) {
+				return i;
+			}
+		}
+		return -1;
+	}
+	
+	//
 	// Set up this class object.
 	//
 	

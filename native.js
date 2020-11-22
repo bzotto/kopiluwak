@@ -88,6 +88,12 @@ KLNativeImpls["java.lang.System"] = {
 KLNativeImpls["java.lang.Runtime"] = {
 	"availableProcessors#()I": function() {
 		return new JInt(1);
+	},
+	"maxMemory#()J": function(thread) {
+		// XXX We should be able to grab Long.MAX_VALUE here but it's not being set by Long's <clinit>
+		// and I don't know why.
+		let longMax = new KLInt64([0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+		return new JLong(longMax);
 	}
 };
 
@@ -98,15 +104,22 @@ KLNativeImpls["java.lang.Thread"] = {
 	}, 
 	"isAlive#()Z": function() {
 		return new JInt(1);
+	},
+	"setPriority0#(I)V": function() {
+		// We don't keep meta state about the current (indeed any) thread, and this is a courtesy call
+		// into the VM to keep us aware of the change that will have already happened in the field of
+		// the Thread object.
 	}
 };
 
 KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 	"vmProperties#()[Ljava.lang.String;": function() { 
 		let arrayClass = ResolveClass("[Ljava.lang.String;");
-		let arr = new JArray(arrayClass, 4);
+		let arr = new JArray(arrayClass, 6);
 		arr.elements[0] = JavaLangStringObjForJSString("java.home");
 		arr.elements[1] = JavaLangStringObjForJSString("/");
+		arr.elements[2] = JavaLangStringObjForJSString("java.class.version");
+		arr.elements[3] = JavaLangStringObjForJSString("52.0");  // This represents the SE8 version. 
 		return arr;
 	},
 	"platformProperties#()[Ljava.lang.String;": function() {
@@ -136,6 +149,17 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 	},
 	"arrayIndexScale0#(Ljava.lang.Class;)I": function() {
 		return new JInt(0);
+	},
+	"objectFieldOffset1#(Ljava.lang.Class;Ljava.lang.String;)J": function(thread, unsafeObj, classObj, nameObj) {
+		let klclass = classObj.meta.classClass;
+		let fieldName = JSStringFromJavaLangStringObj(nameObj);
+		let unsafeOffset = klclass.unsafeOffsetForInstanceField(fieldName);
+		if (unsafeOffset < 0) {
+			thread.throwException("java.lang.InternalError", "Unsafe.objectFieldOffset1: Invalid field " + 
+				fieldName + " for instances of class " + klclass.name);
+			return;
+		}
+		return new JLong(KLInt64FromNumber(unsafeOffset));
 	}
 };
 

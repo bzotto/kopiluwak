@@ -37,12 +37,22 @@ function KLThreadContext(bootstrapMethod) {
 		return outgoingFrame;
 	}
 	
-	this.throwException = function(exceptionClassName) {
+	// Exception class name is required; message (JS string) and cause (Throwable jobject) are optional.
+	this.throwException = function(exceptionClassName, message, cause) {
+		
+		// XXX Debug dump
+		let bt = DebugBacktrace(this);
+		console.log("Exception " + exceptionClassName + ": " + (message?message:"?") + "\n" + bt);
+		////
+		
+		
 		let npeClass = ResolveClass(exceptionClassName);
 		let e = npeClass.createInstance();
 		this.stack[0].pendingException = e; // Not initialized yet but will be when we unwind back to it!
-		let initFrame = CreateObjInitFrameIfNeeded(e);
+		let initFrame = CreateObjInitFrameForObjectAndDescriptor(e, "(Ljava.lang.String;Ljava.lang.Throwable)V");
 		initFrame.localVariables[0] = e;
+		initFrame.localVariables[1] = message ? JavaLangStringObjForJSString(message) : new JNull();
+		initFrame.localVariables[2] = cause ? cause : new JNull();
 		initFrame.completionHandlers.push(function() { 
 			e.state = JOBJ_STATE_INITIALIZED;
 		});
@@ -62,6 +72,7 @@ function KLThreadContext(bootstrapMethod) {
 			let klclass = ResolveClass("java.lang.Thread");
 			this.javaThreadObj = klclass.createInstance();
 			this.javaThreadObj.fieldValsByClass["java.lang.Thread"]["name"] = JavaLangStringObjForJSString("Thread-main");
+			this.javaThreadObj.fieldValsByClass["java.lang.Thread"]["priority"] = new JInt(1);
 			this.javaThreadObj.state = JOBJ_STATE_INITIALIZED;
 			
 			klclass = ResolveClass("java.lang.ThreadGroup");
@@ -144,7 +155,10 @@ function KLThreadContext(bootstrapMethod) {
 							}
 						}						
 						let result = frame.method.impl.apply(null, implArgs);
-						if (!frame.pendingException) {
+						// Skip the epilog logic if the native impl either pushed another frame onto the stack (called another
+						// method) or threw an exception. In the former case, we will unwind back to this frame eventually and 
+						// re-invoke the same method in full so the impl must be smart enough to know when to return.
+						if (this.stack[0] == frame && !frame.pendingException) {
 							// Pop this frame and result the result *unless* the native impl threw an exception.
 							this.popFrame();
 							if (!frame.method.descriptor.returnsVoid()) {
@@ -164,9 +178,7 @@ function KLThreadContext(bootstrapMethod) {
 				}	
 			}
 			
-			if (!code) {
-				debugger;
-			}
+			if (!code) { debugger; }
 			
 			// Verify that the pc is valid. 
 			if (pc < 0 || pc >= code.length) {
@@ -1552,6 +1564,13 @@ function KLThreadContext(bootstrapMethod) {
 		if (!ObjectIsA(objectref, "java.lang.Throwable")) {
 			debugger;
 		}
+		
+		// XXX DEBUG
+		let bt = DebugBacktrace(thread);
+		let message = objectref.fieldValsByClass["java.lang.Throwable"]["message"];
+		console.log("*** athrow of Exception " + objectref.class.name + ": " + (message?JSStringFromJavaLangStringObj(message):"?") + "\n" + bt);
+		////
+		
 		// N.B. The pc doesn't change here, so the exception handler lookup will happen relative
 		// to this instruction.
 		frame.pendingException = objectref;

@@ -461,6 +461,16 @@ function CreateObjInitFrameIfNeeded(jobj) {
 	return new KLStackFrame(initMethod);
 }
 
+function CreateObjInitFrameForObjectAndDescriptor(jobj, desc) {
+	let initIdentifier = "<init>#" + desc;
+	let initMethod = jobj.class.vtable[initIdentifier];
+	if (!initMethod) {
+		debugger;
+		return null;
+	}
+	return new KLStackFrame(initMethod);
+}
+
 function bp(filename, ln) {
 	JavaBreakpoints.push({"fileName": filename, "lineNumber": ln});
 }
