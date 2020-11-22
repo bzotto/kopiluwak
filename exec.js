@@ -524,6 +524,9 @@ function KLThreadContext(bootstrapMethod) {
 	
 	this.instructionHandlers[INSTR_dup] = function(frame) {
 		let value = frame.operandStack.pop();
+		if (!value.isa.isCategory1ComputationalType()) {
+			debugger;
+		}
 		frame.operandStack.push(value);
 		frame.operandStack.push(value);
 		IncrementPC(frame, 1);
@@ -538,6 +541,24 @@ function KLThreadContext(bootstrapMethod) {
 		frame.operandStack.push(value1);
 		frame.operandStack.push(value2);
 		frame.operandStack.push(value1);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_dup2] = function(frame) {
+		let value1 = frame.operandStack.pop();
+		if (value1.isa.isCategory2ComputationalType()) {
+			frame.operandStack.push(value1);
+			frame.operandStack.push(value1);
+		} else {
+			let value2 = frame.operandStack.pop();
+			if (!value2.isa.isCategory1ComputationalType()) {
+				debugger;
+			}
+			frame.operandStack.push(value2);
+			frame.operandStack.push(value1);
+			frame.operandStack.push(value2);
+			frame.operandStack.push(value1);
+		}
 		IncrementPC(frame, 1);
 	}
 	
@@ -700,7 +721,7 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		let value = frame.operandStack.pop();
-		if (!TypeIsAssignableToType(value.isa, returnType)) {
+		if (!value || !TypeIsAssignableToType(value.isa, returnType)) {
 			debugger;
 		}
 		thread.popFrame();
@@ -709,7 +730,7 @@ function KLThreadContext(bootstrapMethod) {
 	
 	this.instructionHandlers[INSTR_areturn] = function(frame, opcode, thread) {
 		let objectref = frame.operandStack.pop();
-		if (!objectref.isa.isReferenceType() || !TypeIsAssignableToType(objectref.isa, frame.method.descriptor.returnType())) {
+		if (!objectref || !objectref.isa.isReferenceType() || !TypeIsAssignableToType(objectref.isa, frame.method.descriptor.returnType())) {
 			debugger;
 		}
 		thread.popFrame();
@@ -718,7 +739,7 @@ function KLThreadContext(bootstrapMethod) {
 	
 	this.instructionHandlers[INSTR_dreturn] = function(frame, opcode, thread) {
 		let value = frame.operandStack.pop();
-		if (!value.isa.isDouble() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isDouble())  {
+		if (!value || !value.isa.isDouble() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isDouble())  {
 			debugger;
 		}
 		thread.popFrame();
@@ -727,7 +748,7 @@ function KLThreadContext(bootstrapMethod) {
 	
 	this.instructionHandlers[INSTR_lreturn] = function(frame, opcode, thread) {
 		let value = frame.operandStack.pop();
-		if (!value.isa.isLong() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isLong())  {
+		if (!value || !value.isa.isLong() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isLong())  {
 			debugger;
 		}
 		thread.popFrame();

@@ -546,6 +546,10 @@ function KLClassFromLoadedClass(loadedClass) {
 		for (let methodIdentifier in classImpls) {
 			let impl = classImpls[methodIdentifier];
 			let method = klclass.vtable[methodIdentifier];
+			if (!method) {
+                // The impl's identifier wasn't found on the class...
+                debugger; 
+           	}
 			if (method.impl != null) {
 				debugger;
 			}
@@ -593,6 +597,7 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	if (initPhase1Method) {
 		let ctx = new KLThreadContext(initPhase1Method);
 		ctx.exec();
+		debugger;
 	}
 	
 	// Load the main class

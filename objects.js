@@ -25,7 +25,24 @@ function JObj(klclass) {
 	
 	this.meta = {}; // storage for VM metadata. Useful for e.g. Java Class objects to tie back to what they reflect.
 	
-	// Set up the field val class buckets and their default values.
+	//
+	// Support for jdk.internal.misc.Unsafe
+	//
+	
+	this.unsafeGetFieldValForOffset = function(containingClass, offset) {
+		let fieldName = containingClass.unsafeFieldNameForOffset(offset);
+		return this.fieldValsByClass[containingClass.name][fieldName];
+	}
+	
+	this.unsafeSetFieldValForOffset = function(containingClass, offset, value) {
+		let fieldName = containingClass.unsafeFieldNameForOffset(offset);
+		this.fieldValsByClass[containingClass.name][fieldName] = value;
+	}
+	
+	//
+	// Construction
+	//
+	
 	let currentClass = klclass;
 	do {
 		this.fieldValsByClass[currentClass.name] = {};
@@ -283,6 +300,11 @@ function KLClass(loadedOrArrayClass, superclass) {
 		return -1;
 	}
 	
+	this.unsafeFieldNameForOffset = function(offset) {
+		let allFields = Object.keys(this.fields);
+		return allFields[offset];
+	}
+		
 	//
 	// Set up this class object.
 	//

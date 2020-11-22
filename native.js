@@ -33,6 +33,20 @@ KLNativeImpls["java.lang.Class"] = {
 		} else {
 			return new JInt(0);
 		}
+	},
+	"isInterface#()Z": function(thread, classObj) {
+		let classClass = classObj.meta.classClass;
+		if (classClass && classClass.isInterface()) {
+			return new JInt(1);
+		} else {
+			return new JInt(0);
+		}
+	},
+	"getDeclaredConstructors0#(Z)[Ljava.lang.reflect.Constructor;": function(thread, classObj, publicObj) {
+		// XXX This just returns an empty array, but this is not correct.
+		let klclass = ResolveClass("[Ljava.lang.reflect.Constructor;");
+		let jarray = new JArray(klclass, 0);
+		return jarray;
 	}
 };
 
@@ -102,8 +116,13 @@ KLNativeImpls["java.lang.Thread"] = {
 	"currentThread#()Ljava.lang.Thread;": function(thread) {
 		return thread.currentJavaLangThreadObject();
 	}, 
-	"isAlive#()Z": function() {
-		return new JInt(1);
+	"isAlive#()Z": function(thread, threadObj) {
+		if (threadObj == thread.currentJavaLangThreadObject()) {
+			return new JInt(1);
+		}
+		// Only the system thread is "alive". The JRE wants to create daemon threads
+		// and we'll let it, but they don't do anything.
+		return new JInt(0);
 	},
 	"setPriority0#(I)V": function() {
 		// We don't keep meta state about the current (indeed any) thread, and this is a courtesy call
@@ -160,6 +179,16 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 			return;
 		}
 		return new JLong(KLInt64FromNumber(unsafeOffset));
+	},
+	"compareAndSetReference#(Ljava.lang.Object;JLjava.lang.Object;Ljava.lang.Object;)Z": function(thread, unsafeObj, oObj, offsetObj, expectedObj, xObj) {
+		let klclass = oObj.class;
+		let offsetInt = offsetObj.val.lowWord();
+		let fieldVal = oObj.unsafeGetFieldValForOffset(klclass, offsetInt);
+		if (fieldVal == expectedObj) {
+			oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
+			return new JInt(1);
+		}
+		return new JInt(0);
 	}
 };
 
