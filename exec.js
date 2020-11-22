@@ -383,7 +383,12 @@ function KLThreadContext(bootstrapMethod) {
 		if (!objectref.isa.isReferenceType()) {
 			debugger;
 		}
-		let value = objectref.fieldValsByClass[fieldRef.className][fieldRef.fieldName];
+		let value = objectref.fieldValsByClass[field.class.name][field.name];
+		if (!value || !TypeIsAssignableToType(value.isa, field.field.type)) {
+			// This is an extra check while VM is under development. This break indicates a bug in the VM logic,
+			// not a type-unsafe class file.
+			debugger;
+		}
 		frame.operandStack.push(value);
 		IncrementPC(frame, 3);
 	}
@@ -415,7 +420,7 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		
-		objectref.fieldValsByClass[fieldRef.className][fieldRef.fieldName] = value;
+		objectref.fieldValsByClass[field.class.name][field.name] = value;
 		IncrementPC(frame, 3);
 	}
 	
@@ -766,10 +771,9 @@ function KLThreadContext(bootstrapMethod) {
 			return;
 		}
 		if (!arrayref.isa.isArray()) {
-			// error should be understood statically. throw?
 			debugger;
 		}
-		let length = new JInt(arrayref.count);
+		let length = new JInt(arrayref.count);		
 		frame.operandStack.push(length);
 		IncrementPC(frame, 1);
 	}

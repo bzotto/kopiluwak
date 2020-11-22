@@ -122,7 +122,7 @@ function JavaLangStringObjForUTF16Bytes(bytes) {
 	let stringClass = ResolveClass("java.lang.String");
 	stringObj = stringClass.createInstance();
 	stringObj.fieldValsByClass["java.lang.String"]["value"] = byteArray;
-	stringObj.fieldValsByClass["java.lang.String"]["coder"] = new JInt(1);  // = UTF16
+	stringObj.fieldValsByClass["java.lang.String"]["coder"] = new JInt(0);  // = LATIN1 (each byte is one char)
 	stringObj.state = JOBJ_STATE_INITIALIZED;
 	return stringObj;
 }
@@ -145,6 +145,18 @@ function JSStringFromJavaLangStringObj(jobj) {
 	let jsstring = "";
 	for (let i = 0; i < arrayref.elements.length; i++) {
 		jsstring += String.fromCharCode(arrayref.elements[i].val);
+	}
+	return jsstring;
+}
+
+function JSStringFromByteArrayDEBUG(jarray) {
+	if (!jarray.isa.isArray() || !jarray.isa.arrayComponentType().isByte()) {
+		debugger;
+		return "";
+	}
+	let jsstring = "";
+	for (let i = 0; i < jarray.elements.length; i++) {
+		jsstring += String.fromCharCode(jarray.elements[i].val);
 	}
 	return jsstring;
 }
@@ -276,7 +288,7 @@ function ResolveFieldReference(fieldRef) {
 		return {};
 	}
 	
-	return { "class": fieldClass, "field": field };
+	return { "name": fieldRef.fieldName, "class": fieldClass, "field": field };
 }
 
 function Signed16bitValFromTwoBytes(val1, val2) {
