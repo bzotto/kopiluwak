@@ -1223,6 +1223,39 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_l2f] = instr_l2_floating;
 	this.instructionHandlers[INSTR_l2d] = instr_l2_floating;
 	
+	this.instructionHandlers[INSTR_d2l] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isDouble()) {
+			debugger;
+		}
+		let int64 = KLInt64FromNumber(value.val);
+		let result = new JLong(int64);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);		
+	}
+	
+	this.instructionHandlers[INSTR_f2l] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isFloat()) {
+			debugger;
+		}
+		let int64 = KLInt64FromNumber(value.val);
+		let result = new JLong(int64);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);		
+	}
+	
+	this.instructionHandlers[INSTR_f2d] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isFloat()) {
+			debugger;
+		}
+		let doubleVal = value.val
+		let result = new JDouble(doubleVal);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);		
+	}
+	
 	const instr_int_astore = function(frame, opcode, thread) {
 		let value = frame.operandStack.pop();
 		let index = frame.operandStack.pop();
@@ -1408,6 +1441,18 @@ function KLThreadContext(bootstrapMethod) {
 		}				
 		let floatResult = value1.val / value2.val;
 		let result = new JFloat(floatResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_dadd] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isDouble() || !value2.isa.isDouble()) {
+			debugger;
+		}				
+		let doubleResult = value1.val / value2.val;
+		let result = new JDouble(doubleResult);
 		frame.operandStack.push(result);
 		IncrementPC(frame, 1);
 	}

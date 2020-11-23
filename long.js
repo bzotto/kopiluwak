@@ -81,6 +81,10 @@ const KLInt64MinValue = new KLInt64([0x80, 0, 0, 0, 0, 0, 0, 0]);
 const KLInt64MaxValue = new KLInt64([0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
 
 function KLInt64FromNumber(num) {
+	let sign = num < 0;
+	if (num < 0) {
+		num = -num;
+	}
 	num = Math.trunc(num);
 	let output = [];
 	for (let i = 7; i >= 0; i--) {
@@ -94,7 +98,11 @@ function KLInt64FromNumber(num) {
 		}
 		output[i] = byte;
 	}
-	return new KLInt64(output);
+	let result = new KLInt64(output);
+	if (sign) {
+		result = KLInt64Negated(result);
+	}
+	return result;
 }
 
 function KLInt64Add(int1, int2) {
