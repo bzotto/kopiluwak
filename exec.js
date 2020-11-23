@@ -445,6 +445,14 @@ function KLThreadContext(bootstrapMethod) {
 	this.instructionHandlers[INSTR_fconst_1] = instr_fconst_f;
 	this.instructionHandlers[INSTR_fconst_2] = instr_fconst_f;
 	
+	const instr_dconst_d = function(frame, opcode) {
+		let d = opcode - INSTR_dconst_0;
+		frame.operandStack.push(new JDouble(d * 1.0));
+		IncrementPC(frame, 1);
+	}
+	this.instructionHandlers[INSTR_dconst_0] = instr_dconst_d;
+	this.instructionHandlers[INSTR_dconst_1] = instr_dconst_d;
+	
 	this.instructionHandlers[INSTR_anewarray] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
 		let constref = frame.method.class.constantPool[index];
@@ -1175,6 +1183,45 @@ function KLThreadContext(bootstrapMethod) {
 		frame.operandStack.push(result);
 		IncrementPC(frame, 1);		
 	}
+		
+	const instr_l2_floating = function(frame, opcode) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isLong()) {
+			debugger;
+		}
+		let int64 = value.val;
+		let doubleResult = 0.0;
+		// This algorithm doens't handle zero automaticaly, but it's trivial to assign directly.
+		if (!int64.isZero()) { 
+			let sign = int64.isNegative();
+			// Turn the int into its positive version once we know the required sign.
+			if (sign) {
+				// Special case for int64-min which will overflow if negated. 
+				if (int64.isEqualTo(KLInt64MinValue)) {
+					int64 = KLInt64Add(int64, KLInt64One);
+				}
+				int64 = KLInt64Negated(int64);
+			}
+			let leadingZeroes = int64.countLeadingZeroes();
+			let exponent = (63 - leadingZeroes) + 1023;			
+			let intermediate = KLInt64LogicalShiftLeft(int64, leadingZeroes + 1);
+			let significand = KLInt64ShiftRight(intermediate, 12);
+			let noSignResult = KLInt64BitwiseOr(significand, KLInt64LogicalShiftLeft(KLInt64FromNumber(exponent), 52));
+			let finalResult = sign ? KLInt64BitwiseOr(noSignResult, KLInt64MinValue) : noSignResult; // min value has only the sign bit on.
+			doubleResult = fromIEEE754Double(finalResult.asBytes());
+		}
+		let result;
+		if (opcode == INSTR_l2f) {
+			let floatResult = Math.fround(doubleResult);
+			result = new JFloat(floatResult);
+		} else {
+			result = new JDouble(doubleResult);
+		}
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);		
+	}
+	this.instructionHandlers[INSTR_l2f] = instr_l2_floating;
+	this.instructionHandlers[INSTR_l2d] = instr_l2_floating;
 	
 	const instr_int_astore = function(frame, opcode, thread) {
 		let value = frame.operandStack.pop();
@@ -1716,4 +1763,4 @@ function KLThreadContext(bootstrapMethod) {
 		}
 		IncrementPC(frame, 1);
 	}
-}
+	}

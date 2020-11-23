@@ -34,6 +34,15 @@ function KLInt64(bytes) {
 		return ((this.storage[0] << 24) | (this.storage[1] << 16) | (this.storage[2] << 8) | this.storage[3]) >>> 0;
 	}
 	
+	this.isEqualTo = function(other) {
+		for (let i = 0; i < 8; i++) {
+			if (this.storage[i] != other.storage[i]) {
+				return false;
+			}
+		}
+		return true;
+	}
+	
 	this.asHexString = function() {
 		let str = "0x";
 		for (let i = 0; i < 8; i++) {
@@ -42,9 +51,34 @@ function KLInt64(bytes) {
 		}
 		return str;
 	}
+	
+	this.asBytes = function() {
+		return this.storage.slice();
+	}
+
+	this.countLeadingZeroes = function() {
+		let count = 0;
+		for (let i = 0; i < 8; i++) {
+			let byte = this.storage[i];
+			if (byte == 0) {
+				count += 8;
+			} else {
+				let t = 0x80;
+				while ((byte & t) == 0) {
+					t = t >>> 1;
+					count++;
+				}
+			}
+		}
+		return count;
+	}
 }
 
 const KLInt64Zero = new KLInt64([0, 0, 0, 0, 0, 0, 0, 0]);
+const KLInt64One= new KLInt64([0, 0, 0, 0, 0, 0, 0, 1]);
+const KLInt64NegativeOne = new KLInt64([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+const KLInt64MinValue = new KLInt64([0x80, 0, 0, 0, 0, 0, 0, 0]);
+const KLInt64MaxValue = new KLInt64([0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
 
 function KLInt64FromNumber(num) {
 	num = Math.trunc(num);
