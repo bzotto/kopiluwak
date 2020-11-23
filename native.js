@@ -128,6 +128,9 @@ KLNativeImpls["java.lang.Thread"] = {
 		// We don't keep meta state about the current (indeed any) thread, and this is a courtesy call
 		// into the VM to keep us aware of the change that will have already happened in the field of
 		// the Thread object.
+	},
+	"start0#()V": function() {
+		// Actually, don't start it!
 	}
 };
 
@@ -181,11 +184,120 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 	"compareAndSetReference#(Ljava.lang.Object;JLjava.lang.Object;Ljava.lang.Object;)Z": function(thread, unsafeObj, oObj, offsetObj, expectedObj, xObj) {
 		let klclass = oObj.class;
 		let offsetInt = offsetObj.val.lowWord();
-		let fieldVal = oObj.unsafeGetFieldValForOffset(klclass, offsetInt);
-		if (fieldVal == expectedObj) {
-			oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
+		
+		let currentVal;
+		if (klclass.isArray()) {
+			currentVal = oObj.elements[offsetInt];
+		} else {
+			currentVal = oObj.unsafeGetFieldValForOffset(klclass, offsetInt);
+		}
+		if (!currentVal.isa.isReferenceType()) {
+			debugger;
+		}
+		let bothNull = currentVal.isa.isNull() && expectedObj.isa.isNull();
+		if (bothNull || currentVal == expectedObj) {
+			if (klclass.isArray()) {
+				oObj.elements[offsetInt] = xObj;
+			} else {
+				oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
+			}
 			return new JInt(1);
 		}
+		return new JInt(0);
+	},
+	"compareAndSetInt#(Ljava.lang.Object;JII)Z": function(thread, unsafeObj, oObj, offsetObj, expectedObj, xObj) {
+		let klclass = oObj.class;
+		let offsetInt = offsetObj.val.lowWord();
+		
+		let currentVal;
+		if (klclass.isArray()) {
+			currentVal = oObj.elements[offsetInt];
+		} else {
+			currentVal = oObj.unsafeGetFieldValForOffset(klclass, offsetInt);
+		}
+		if (!currentVal.isa.isInt()) {
+			debugger;
+		}
+		if (currentVal.val == expectedObj.val) {
+			if (klclass.isArray()) {
+				oObj.elements[offsetInt] = xObj;
+			} else {
+				oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
+			}
+			return new JInt(1);
+		}
+		return new JInt(0);
+	},
+	"compareAndSetLong#(Ljava.lang.Object;JJJ)Z": function(thread, unsafeObj, oObj, offsetObj, expectedObj, xObj) {
+		let klclass = oObj.class;
+		let offsetInt = offsetObj.val.lowWord();
+		
+		let currentVal;
+		if (klclass.isArray()) {
+			currentVal = oObj.elements[offsetInt];
+		} else {
+			currentVal = oObj.unsafeGetFieldValForOffset(klclass, offsetInt);
+		}
+		if (!currentVal.isa.isLong()) {
+			debugger;
+		}
+		if (currentVal.val.isEqualTo(expectedObj.val)) {
+			if (klclass.isArray()) {
+				oObj.elements[offsetInt] = xObj;
+			} else {
+				oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
+			}
+			return new JInt(1);
+		}
+		return new JInt(0);
+	},
+	"storeFence#()V": function() {
+		// nothing
+	},
+	"getReferenceVolatile#(Ljava.lang.Object;J)Ljava.lang.Object;": function(thread, unsafeObj, oObj, offsetObj) {
+		let klclass = oObj.class;
+		let offsetInt = offsetObj.val.lowWord();
+		let currentVal;
+		if (klclass.isArray()) {
+			currentVal = oObj.elements[offsetInt];
+		} else {
+			currentVal = oObj.unsafeGetFieldValForOffset(klclass, offsetInt);
+		}
+		if (!currentVal.isa.isReferenceType()) {
+			debugger;
+		}
+		return currentVal;
+	},
+	"putReferenceVolatile#(Ljava.lang.Object;JLjava.lang.Object;)V": function(thread, unsafeObj, oObj, offsetObj, xObj) {
+		let klclass = oObj.class;
+		let offsetInt = offsetObj.val.lowWord();
+		if (!xObj.isa.isReferenceType()) {
+			debugger;
+		}
+		if (klclass.isArray()) {
+			oObj.elements[offsetInt] = xObj;
+		} else {
+			oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
+		}
+	},
+	"getIntVolatile#(Ljava.lang.Object;J)I": function(thread, unsafeObj, oObj, offsetObj) {
+		let klclass = oObj.class;
+		let offsetInt = offsetObj.val.lowWord();
+		let currentVal;
+		if (klclass.isArray()) {
+			currentVal = oObj.elements[offsetInt];
+		} else {
+			currentVal = oObj.unsafeGetFieldValForOffset(klclass, offsetInt);
+		}
+		if (!currentVal.isa.isInt()) {
+			debugger;
+		}
+		return currentVal;
+	}
+};
+
+KLNativeImpls["java.util.concurrent.atomic.AtomicLong"] = {
+	"VMSupportsCS8#()Z": function() {
 		return new JInt(0);
 	}
 };

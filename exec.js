@@ -258,6 +258,24 @@ function KLThreadContext(bootstrapMethod) {
 		let s16 = sign ? (0xFFFF0000 | x) : x;
 		return s16;
 	}
+	
+	function S32FromInstruction(frame, offset) {
+		let code = frame.method.code;
+		let one = code[frame.pc + offset];
+		let two = code[frame.pc + offset + 1];
+		let three = code[frame.pc + offset + 2];
+		let four = code[frame.pc + offset + 3];
+		let uval = ((one << 24 ) | (two << 16 ) |  (three << 8 ) | four) >>> 0;
+		let sval;
+		if (uval > 2147483647) {
+			// Surely there's some better way of converting an unsigned value into its
+			// signed 32-bit equivalent...??
+			sval = uval - 0xFFFFFFFF - 1;
+		} else {
+			sval = uval;
+		}
+		return sval;
+	}
 				
 	//
 	// Map of opcode values to handler functions. Each handler function takes a thread context,
@@ -1808,4 +1826,52 @@ function KLThreadContext(bootstrapMethod) {
 		}
 		IncrementPC(frame, 1);
 	}
+	
+	this.instructionHandlers[INSTR_lookupswitch] = function(frame) {
+		let key = frame.operandStack.pop();
+		if (!key.isa.isInt()) {
+			debugger;
+		}
+		let pad = 4 - ((frame.pc % 4) + 1);
+		let argsBase = 1 + pad;
+		let defaultOffset = S32FromInstruction(frame, argsBase);
+		let npairs = S32FromInstruction(frame, argsBase + 4);
+		let pairsBase = argsBase + 8;
+		if (npairs < 0) {
+			debugger;
+		}
+		for (let i = 0; i < npairs; i++) {
+			let match = S32FromInstruction(frame, pairsBase + (i * 8));
+			let offset = S32FromInstruction(frame, pairsBase + (i * 8) + 4);
+			if (match == key.val) {
+				IncrementPC(frame, offset);
+				return;
+			}
+		}
+		IncrementPC(frame, defaultOffset);
 	}
+	
+	this.instructionHandlers[INSTR_tableswitch] = function(frame) {
+		let index = frame.operandStack.pop();
+		if (!index.isa.isInt()) {
+			debugger;
+		}
+		let pad = 4 - ((frame.pc % 4) + 1);
+		let argsBase = 1 + pad;
+		let defaultOffset = S32FromInstruction(frame, argsBase);
+		let low = S32FromInstruction(frame, argsBase + 4);
+		let high = S32FromInstruction(frame, argsBase + 8);
+		if (low > high) {
+			debugger;
+		}
+		if (index.val < low || index.val > high) {
+			IncrementPC(frame, defaultOffset);
+			return;
+		}
+		let offsetsBase = argsBase + 12;
+		let tableIndex = index.val - low;
+		let indexedOffset = offsetsBase + (tableIndex * 4);
+		let jumpOffset = S32FromInstruction(frame, indexedOffset);
+		IncrementPC(frame, jumpOffset);
+	}
+}
