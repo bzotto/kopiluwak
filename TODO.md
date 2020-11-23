@@ -1,3 +1,0 @@
-- creating signed ints from four bytes with shifting >>>0 might not be doing what i think
-- why does java.class.version end up looking in runtime like 59.0 when it's given as 50.0?
-- when java.lang.Long is loaded, MIN\_VALUE and MAX\_VALUE (marked @Native) are not set by <clinit>. Why?

@@ -134,11 +134,9 @@ KLNativeImpls["java.lang.Thread"] = {
 KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 	"vmProperties#()[Ljava.lang.String;": function() { 
 		let arrayClass = ResolveClass("[Ljava.lang.String;");
-		let arr = new JArray(arrayClass, 6);
+		let arr = new JArray(arrayClass, 4);
 		arr.elements[0] = JavaLangStringObjForJSString("java.home");
 		arr.elements[1] = JavaLangStringObjForJSString("/");
-		arr.elements[2] = JavaLangStringObjForJSString("java.class.version");
-		arr.elements[3] = JavaLangStringObjForJSString("52.0");  // This represents the SE8 version. 
 		return arr;
 	},
 	"platformProperties#()[Ljava.lang.String;": function() {

@@ -281,75 +281,37 @@ function KLThreadContext(bootstrapMethod) {
 		}
 		let constref = frame.method.class.constantPool[index];
 		let val;
-		switch (constref.tag) {
-			case CONSTANT_Class:
-				{
-					let className = frame.method.class.classNameFromUtf8Constant(constref.name_index);
-					let klclass = ResolveClass(className);
-					let jobj = JavaLangClassObjForClass(klclass);
-					let initFrame;
-					if (jobj.state != JOBJ_STATE_INITIALIZED && (initFrame = CreateObjInitFrameIfNeeded(jobj))) {
-						jobj.state = JOBJ_STATE_INITIALIZING;
-						initFrame.completionHandlers.push(function() { 
-							jobj.state = JOBJ_STATE_INITIALIZED;
-						});
-						thread.pushFrame(initFrame);
-						// Do not increment the PC here, we will restart this instruction.
-					} else {
-						val = jobj;
-					}
-					break;
-				}
-			case CONSTANT_String:
-				{
-					let strconst = frame.method.class.constantPool[constref.string_index];
-					let strbytes = strconst.bytes;
-					val = JavaLangStringObjForUTF16Bytes(strbytes);
-					break;
-				}
-			case CONSTANT_Integer:
-				val = new JInt(constref.bytes);
-				break;
-			case CONSTANT_Float:
-				{
-					let bytes = [];
-					bytes.push((constref.bytes >>> 24) & 0xFF);
-					bytes.push((constref.bytes >>> 16) & 0xFF);
-					bytes.push((constref.bytes >>> 8) & 0xFF);
-					bytes.push((constref.bytes) & 0xFF);
-					val = new JFloat(fromIEEE754Single(bytes));
-					break;
-				}
-			default:
-				alert("ldc needs a new case for constant " + constref.tag);
+		if (constref.tag == CONSTANT_Class) {
+			let className = frame.method.class.classNameFromUtf8Constant(constref.name_index);
+			let klclass = ResolveClass(className);
+			let jobj = JavaLangClassObjForClass(klclass);
+			let initFrame;
+			if (jobj.state != JOBJ_STATE_INITIALIZED && (initFrame = CreateObjInitFrameIfNeeded(jobj))) {
+				jobj.state = JOBJ_STATE_INITIALIZING;
+				initFrame.completionHandlers.push(function() { 
+					jobj.state = JOBJ_STATE_INITIALIZED;
+				});
+				thread.pushFrame(initFrame);
+				return;
+			} else {
+				val = jobj;
+			}			
+		} else {
+			val = frame.method.class.constantValueFromConstantPool(index);
 		}
-		if (val != undefined) {
-			frame.operandStack.push(val);
-			IncrementPC(frame, instlen);
+		if (val == undefined) {
+			debugger;
 		}
+		frame.operandStack.push(val);
+		IncrementPC(frame, instlen);
 	};
 	this.instructionHandlers[INSTR_ldc] = instr_ldc;
 	this.instructionHandlers[INSTR_ldc_w] = instr_ldc;
 	
 	this.instructionHandlers[INSTR_ldc2_w] = function(frame, opcode, thread) {
 		index = U16FromInstruction(frame);
-		let constref = frame.method.class.constantPool[index];
-		let val;
-		let bytes = [];
-		bytes.push((constref.high_bytes >>> 24) & 0xFF);
-		bytes.push((constref.high_bytes >>> 16) & 0xFF);
-		bytes.push((constref.high_bytes >>> 8) & 0xFF);
-		bytes.push((constref.high_bytes) & 0xFF);
-		bytes.push((constref.low_bytes >>> 24) & 0xFF);
-		bytes.push((constref.low_bytes >>> 16) & 0xFF);
-		bytes.push((constref.low_bytes >>> 8) & 0xFF);
-		bytes.push((constref.low_bytes) & 0xFF);
-		if (constref.tag == CONSTANT_Long) {
-			let int64 = new KLInt64(bytes);
-			val = new JLong(int64);
-		} else if (constref.tag == CONSTANT_Double) {
-			val = new JDouble(fromIEEE754Double(bytes));
-		} else {
+		let val = frame.method.class.constantValueFromConstantPool(index);
+		if (val == undefined) {
 			debugger;
 		}
 		frame.operandStack.push(val);
@@ -360,13 +322,18 @@ function KLThreadContext(bootstrapMethod) {
 		let index = U16FromInstruction(frame);
 		let fieldRef = frame.method.class.fieldReferenceFromIndex(index);
 		let field = ResolveFieldReference(fieldRef);  
-		// Is the class in which the field lives intialized yet? 
+		if (!field) {
+			thread.throwException("java.lang.IncompatibleClassChangeError", "Cannot resolve static field " + fieldRef.fieldName + " for class " + fieldRef.className);
+			return;
+		}
 		if (field.class.state != KLCLASS_STATE_INITIALIZED && (clinitFrame = CreateClassInitFrameIfNeeded(field.class))) {
 			field.class.state = KLCLASS_STATE_INITIALIZING;
 			thread.pushFrame(clinitFrame);
 		} else {
-			// Get the value of the static field XXXX
-			let fieldValue = field.class.fieldValsByClass[fieldRef.className][fieldRef.fieldName];
+			let fieldValue = field.class.fieldVals[fieldRef.fieldName];
+			if (!fieldValue) {
+				debugger;
+			}
 			frame.operandStack.push(fieldValue);
 			IncrementPC(frame, 3);
 		}
@@ -376,13 +343,20 @@ function KLThreadContext(bootstrapMethod) {
 		let index = U16FromInstruction(frame);
 		let fieldRef = frame.method.class.fieldReferenceFromIndex(index);
 		let field = ResolveFieldReference(fieldRef);  
+		if (!field) {
+			thread.throwException("java.lang.IncompatibleClassChangeError", "Cannot resolve static field " + fieldRef.fieldName + " for class " + fieldRef.className);
+			return;
+		}
 		// Is the class in which the field lives intialized yet? 
 		if (field.class.state != KLCLASS_STATE_INITIALIZED && (clinitFrame = CreateClassInitFrameIfNeeded(field.class))) {
 			field.class.state = KLCLASS_STATE_INITIALIZING;
 			thread.pushFrame(clinitFrame);
 		} else {
 			let fieldValue = frame.operandStack.pop();
-			field.class.fieldValsByClass[fieldRef.className][fieldRef.fieldName] = fieldValue;
+			if (!fieldValue) {
+				debugger;
+			}
+			field.class.fieldVals[fieldRef.fieldName] = fieldValue;
 			IncrementPC(frame, 3);
 		}
 	}

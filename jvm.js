@@ -275,7 +275,7 @@ function ResolveFieldReference(fieldRef) {
 	let fieldClass = klclass;
 	let field = fieldClass.fields[fieldRef.fieldName];
 	while (!field && fieldClass.superclassName != null) {
-		fieldClass = ResolveClass(fieldClass.superclassName);
+		fieldClass = fieldClass.superclass;
 		field = fieldClass.fields[fieldRef.fieldName];
 	}
 		

@@ -208,6 +208,8 @@ function KLClassLoader(classFileHexStringOrBytes) {
 				lineNumberTable.push(lineNumberEntry);
 			}
 			info["line_number_table"] = lineNumberTable;
+		} else if (name == "ConstantValue") {
+			info["constantvalue_index"] = readU2();
 		} else {
 			// console.log("classloader: skipping attribute \"" + name + "\"");
 			info["info"] = readU1Array(attributeLength);
