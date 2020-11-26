@@ -84,6 +84,14 @@ function ResolveClass(className) {
 		return null;
 	}
 	
+	// This routine can accept class and interface names in descriptor format for parallelism with 
+	// acceptance of array descriptors. If that's what we've been given, extract the class or
+	// interface name.
+	let classDesc = className.match(/^L(.+);$/)
+	if (classDesc && classDesc.length == 2) {
+		className = classDesc[1];
+	}
+	
 	for (var i = 0; i < LoadedClasses.length; i++) {
 		var loadedClass = LoadedClasses[i];
 		if (loadedClass.name == className) {

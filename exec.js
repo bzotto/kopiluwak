@@ -131,7 +131,7 @@ function KLThreadContext(bootstrapMethod) {
 					continue;
 				}
 				
-				 console.log("Entering -> " + this.currentFQMethodName());
+				 // console.log("Entering -> " + this.currentFQMethodName());
 				
 				if (ShouldBreakOnMethodStart(this)) { debugger; }
 				
@@ -162,6 +162,9 @@ function KLThreadContext(bootstrapMethod) {
 							// Pop this frame and result the result *unless* the native impl threw an exception.
 							this.popFrame();
 							if (!frame.method.descriptor.returnsVoid()) {
+								if (!result || !TypeIsAssignableToType(result.isa, frame.method.descriptor.returnType())) {
+									debugger;
+								}
 								this.stack[0].operandStack.push(result);
 							}
 						}
@@ -1565,7 +1568,6 @@ function KLThreadContext(bootstrapMethod) {
 				}
 			}
 		} else if (S.isArray()) {
-			let SC = S.arrayComponentType();
 			if (T.isOrdinaryClass()) {
 				if (T.name == "java.lang.Object") {
 					return true;
@@ -1575,12 +1577,13 @@ function KLThreadContext(bootstrapMethod) {
 					return true;
 				}
 			} else if (T.isArray()) {
+				let SC = S.arrayComponentType();
 				let TC = T.arrayComponentType();
 				if (SC.isPrimitiveType() && TC.isPrimitiveType() && SC.isIdenticalTo(TC)) {
 					return true;
 				} else if (SC.isReferenceType() && TC.isReferenceType()) {
 					// Get the descriptor string from each component type, resolve them each, and then
-					// call this deteminor recursively.
+					// call this deteminor recursively. 
 					let scClass = ResolveClass(SC.descriptorString());
 					let tcClass = ResolveClass(TC.descriptorString());
 					return DetermineIfIsInstanceOf(scClass, tcClass);	

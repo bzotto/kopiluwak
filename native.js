@@ -165,11 +165,62 @@ KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 		return arr;
 	},
 	"platformProperties#()[Ljava.lang.String;": function() {
-		// Pull out the number of props we need to supply.
-		// let propsRawClass = ResolveClass("jdk.internal.util.SystemProps$Raw");
-		// let maxPropsValue = propsRawClass.fieldValsByClass["jdk.internal.util.SystemProps$Raw"]["FIXED_LENGTH"];
 		let arrayClass = ResolveClass("[Ljava.lang.String;");
-		return new JArray(arrayClass, 42);
+		let props = new JArray(arrayClass, 42); // 
+		props.elements[0] = JavaLangStringObjForJSString("javalandia"); // _display_country_NDX
+		props.elements[1] = JavaLangStringObjForJSString(navigator.language); // _display_language_NDX
+		props.elements[4] = JavaLangStringObjForJSString("UTF-8"); // _file_encoding_NDX
+		props.elements[5] = JavaLangStringObjForJSString("/"); // _file_separator_NDX
+		props.elements[19] = JavaLangStringObjForJSString("\n"); // _line_separator_NDX
+ 		props.elements[20] = JavaLangStringObjForJSString(navigator.platform); // _os_arch_NDX
+ 		props.elements[21] = JavaLangStringObjForJSString(navigator.appName); // _os_name_NDX
+ 		props.elements[22] = JavaLangStringObjForJSString(navigator.userAgent); // _os_version_NDX
+ 		props.elements[23] = JavaLangStringObjForJSString("/"); // _os_version_NDX
+		return props;
+	
+		/* see jdk.internal.util.SystemProps for this ordered list:
+		
+        @Native private static final int _display_country_NDX = 0;
+        @Native private static final int _display_language_NDX = 1 + _display_country_NDX;
+        @Native private static final int _display_script_NDX = 1 + _display_language_NDX;
+        @Native private static final int _display_variant_NDX = 1 + _display_script_NDX;
+        @Native private static final int _file_encoding_NDX = 1 + _display_variant_NDX;
+        @Native private static final int _file_separator_NDX = 1 + _file_encoding_NDX;
+        @Native private static final int _format_country_NDX = 1 + _file_separator_NDX;
+        @Native private static final int _format_language_NDX = 1 + _format_country_NDX;
+        @Native private static final int _format_script_NDX = 1 + _format_language_NDX;
+        @Native private static final int _format_variant_NDX = 1 + _format_script_NDX;
+        @Native private static final int _ftp_nonProxyHosts_NDX = 1 + _format_variant_NDX;
+        @Native private static final int _ftp_proxyHost_NDX = 1 + _ftp_nonProxyHosts_NDX;
+        @Native private static final int _ftp_proxyPort_NDX = 1 + _ftp_proxyHost_NDX;
+        @Native private static final int _http_nonProxyHosts_NDX = 1 + _ftp_proxyPort_NDX;
+        @Native private static final int _http_proxyHost_NDX = 1 + _http_nonProxyHosts_NDX;
+        @Native private static final int _http_proxyPort_NDX = 1 + _http_proxyHost_NDX;
+        @Native private static final int _https_proxyHost_NDX = 1 + _http_proxyPort_NDX;
+        @Native private static final int _https_proxyPort_NDX = 1 + _https_proxyHost_NDX;
+        @Native private static final int _java_io_tmpdir_NDX = 1 + _https_proxyPort_NDX;
+        @Native private static final int _line_separator_NDX = 1 + _java_io_tmpdir_NDX;
+        @Native private static final int _os_arch_NDX = 1 + _line_separator_NDX;
+        @Native private static final int _os_name_NDX = 1 + _os_arch_NDX;
+        @Native private static final int _os_version_NDX = 1 + _os_name_NDX;
+        @Native private static final int _path_separator_NDX = 1 + _os_version_NDX;
+        @Native private static final int _socksNonProxyHosts_NDX = 1 + _path_separator_NDX;
+        @Native private static final int _socksProxyHost_NDX = 1 + _socksNonProxyHosts_NDX;
+        @Native private static final int _socksProxyPort_NDX = 1 + _socksProxyHost_NDX;
+        @Native private static final int _sun_arch_abi_NDX = 1 + _socksProxyPort_NDX;
+        @Native private static final int _sun_arch_data_model_NDX = 1 + _sun_arch_abi_NDX;
+        @Native private static final int _sun_cpu_endian_NDX = 1 + _sun_arch_data_model_NDX;
+        @Native private static final int _sun_cpu_isalist_NDX = 1 + _sun_cpu_endian_NDX;
+        @Native private static final int _sun_io_unicode_encoding_NDX = 1 + _sun_cpu_isalist_NDX;
+        @Native private static final int _sun_jnu_encoding_NDX = 1 + _sun_io_unicode_encoding_NDX;
+        @Native private static final int _sun_os_patch_level_NDX = 1 + _sun_jnu_encoding_NDX;
+        @Native private static final int _sun_stderr_encoding_NDX = 1 + _sun_os_patch_level_NDX;
+        @Native private static final int _sun_stdout_encoding_NDX = 1 + _sun_stderr_encoding_NDX;
+        @Native private static final int _user_dir_NDX = 1 + _sun_stdout_encoding_NDX;
+        @Native private static final int _user_home_NDX = 1 + _user_dir_NDX;
+        @Native private static final int _user_name_NDX = 1 + _user_home_NDX;
+        @Native private static final int FIXED_LENGTH = 1 + _user_name_NDX;
+		*/	
 	}
 };
 
