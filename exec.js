@@ -699,8 +699,6 @@ function KLThreadContext(bootstrapMethod) {
 		let n = opcode - INSTR_aload_0;
 		let objectref = frame.localVariables[n];
 		if (!objectref.isa.isReferenceType()) {
-			// error. throw?
-			console.log("aload_n expected reference type");
 			debugger;
 		}
 		frame.operandStack.push(objectref);
@@ -738,6 +736,15 @@ function KLThreadContext(bootstrapMethod) {
 		}
 		thread.popFrame();
 		thread.stack[0].operandStack.push(objectref);
+	}
+	
+	this.instructionHandlers[INSTR_freturn] = function(frame, opcode, thread) {
+		let value = frame.operandStack.pop();
+		if (!value || !value.isa.isFloat() || !frame.method.descriptor.returnType() || !frame.method.descriptor.returnType().isFloat())  {
+			debugger;
+		}
+		thread.popFrame();
+		thread.stack[0].operandStack.push(value);
 	}
 	
 	this.instructionHandlers[INSTR_dreturn] = function(frame, opcode, thread) {
