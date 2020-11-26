@@ -6,6 +6,7 @@
 
 function JNull() {
 	this.isa = new JType(JTYPE_NULL);
+	this.str = function() { return "JNull"; }
 }
 
 const JOBJ_STATE_UNINITIALIZED = 0;
@@ -24,6 +25,18 @@ function JObj(klclass) {
 	this.fieldValsByClass = {};			// keyed by classname:{name:value}
 	
 	this.meta = {}; // storage for VM metadata. Useful for e.g. Java Class objects to tie back to what they reflect.
+	
+	//
+	// Debug support
+	//
+	
+	this.str = function() { 
+		if (this.class.name == "java.lang.String") {
+			return 'JObj (java.lang.String): "'+ JSStringFromJavaLangStringObj(this) + '"'
+		} else {
+			return "JObj (" + this.class.name + ")";
+		}
+	}
 	
 	//
 	// Support for jdk.internal.misc.Unsafe
@@ -70,6 +83,8 @@ function JArray(klclass, count) {
 	this.count = count;
 	this.elements = [];
 	
+	this.str = function() { return "JArray (" + this.isa.descriptorString() + "), count: " + this.count; }
+	
 	let defaultValue = DefaultValueForType(this.containsType);
 	for (let i = 0; i < count; i++) {
 		this.elements[i] = defaultValue;
@@ -79,42 +94,50 @@ function JArray(klclass, count) {
 function JByte(val) {
 	this.isa = new JType(JTYPE_BYTE);
 	this.val = (val != undefined) ? val : 0; 
+	this.str = function() { return "JByte: " + this.val; }
 }
 
 function JShort(val) {
 	this.isa = new JType(JTYPE_SHORT);
 	this.val = (val != undefined) ? val : 0; 
+	this.str = function() { return "JShort: " + this.val; }
 }
 
 function JInt(val) {
 	this.isa = new JType(JTYPE_INT);
 	this.val = (val != undefined) ? val : 0; 
+	this.str = function() { return "JInt: " + this.val; }
 }
 
 function JLong(val) {
 	this.isa = new JType(JTYPE_LONG);
 	this.val = (val != undefined) ? val : KLInt64Zero;
+	this.str = function() { return "JLong: " + this.val.asHexString(); }
 }
 
 function JChar(val) {
 	this.isa = new JType(JTYPE_CHAR);
 	this.val = (val != undefined) ? val : 0; 
+	this.str = function() { return "JChar: " + this.val; }
 }
 
 function JFloat(val) {
 	this.isa = new JType(JTYPE_FLOAT);
 	this.val = (val != undefined) ? val : +0.0;
 	this.isNaN = function() { return isNaN(this.val); }
+	this.str = function() { return "JFloat: " + this.val; }
 }
 
 function JDouble(val) {
 	this.isa = new JType(JTYPE_DOUBLE);
 	this.val = (val != undefined) ? val : +0.0;
+	this.str = function() { return "JDouble: " + this.val; }
 }
 
 function JReturnAddr(val) {
 	this.isa = new JType(JTYPE_RETURNADDR);
 	this.val = (val != undefined) ? val : 0; 
+	this.str = function() { return "JReturnAddr: " + this.val; }
 }
 
 const JBooleanFalse = new JInt(0);

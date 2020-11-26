@@ -29,17 +29,17 @@ KLNativeImpls["java.lang.Class"] = {
 	"isPrimitive#()Z": function(thread, classObj) {
 		let primitiveName = classObj.meta.primitiveName;
 		if (primitiveName) {
-			return new JInt(1);
+			return JBooleanTrue;
 		} else {
-			return new JInt(0);
+			return JBooleanFalse;
 		}
 	},
 	"isInterface#()Z": function(thread, classObj) {
 		let classClass = classObj.meta.classClass;
 		if (classClass && classClass.isInterface()) {
-			return new JInt(1);
+			return JBooleanTrue;
 		} else {
-			return new JInt(0);
+			return JBooleanFalse;
 		}
 	},
 	"getDeclaredConstructors0#(Z)[Ljava.lang.reflect.Constructor;": function(thread, classObj, publicObj) {
@@ -96,6 +96,15 @@ KLNativeImpls["java.lang.System"] = {
 		for (let i = 0; i < lengthInt; i++) {
 			dest.elements[destPosInt + i] = intermediate[i];
 		}
+	},
+	"setIn0#(Ljava.io.InputStream;)V": function() {
+		
+	}, 
+	"setOut0#(Ljava.io.PrintStream;)V": function() {
+		
+	}, 
+	"setErr0#(Ljava.io.PrintStream;)V": function() {
+		
 	}
 };
 
@@ -118,11 +127,11 @@ KLNativeImpls["java.lang.Thread"] = {
 	}, 
 	"isAlive#()Z": function(thread, threadObj) {
 		if (threadObj == thread.currentJavaLangThreadObject()) {
-			return new JInt(1);
+			return JBooleanTrue;
 		}
 		// Only the system thread is "alive". The JRE wants to create daemon threads
 		// and we'll let it, but they don't do anything.
-		return new JInt(0);
+		return JBooleanFalse;
 	},
 	"setPriority0#(I)V": function() {
 		// We don't keep meta state about the current (indeed any) thread, and this is a courtesy call
@@ -136,10 +145,23 @@ KLNativeImpls["java.lang.Thread"] = {
 
 KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 	"vmProperties#()[Ljava.lang.String;": function() { 
+		let props = [];
+		props.push(JavaLangStringObjForJSString("java.home"));
+		props.push(JavaLangStringObjForJSString("/"));
+		props.push(JavaLangStringObjForJSString("user.home"));
+		props.push(JavaLangStringObjForJSString("/"));
+		props.push(JavaLangStringObjForJSString("user.dir"));
+		props.push(JavaLangStringObjForJSString("/"));
+		props.push(JavaLangStringObjForJSString("user.name"));
+		props.push(JavaLangStringObjForJSString("/"));
+		props.push(JavaLangStringObjForJSString("java.io.tmpdir"));
+		props.push(JavaLangStringObjForJSString("/"));	
+		props.push(new JNull());
+		props.push(new JNull());
+			
 		let arrayClass = ResolveClass("[Ljava.lang.String;");
-		let arr = new JArray(arrayClass, 4);
-		arr.elements[0] = JavaLangStringObjForJSString("java.home");
-		arr.elements[1] = JavaLangStringObjForJSString("/");
+		let arr = new JArray(arrayClass, props.length	);
+		arr.elements = props;
 		return arr;
 	},
 	"platformProperties#()[Ljava.lang.String;": function() {
@@ -168,7 +190,7 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 		return new JInt(0);
 	},
 	"arrayIndexScale0#(Ljava.lang.Class;)I": function() {
-		return new JInt(0);
+		return new JInt(1);
 	},
 	"objectFieldOffset1#(Ljava.lang.Class;Ljava.lang.String;)J": function(thread, unsafeObj, classObj, nameObj) {
 		let klclass = classObj.meta.classClass;
@@ -201,9 +223,9 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 			} else {
 				oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
 			}
-			return new JInt(1);
+			return JBooleanTrue;
 		}
-		return new JInt(0);
+		return JBooleanFalse;
 	},
 	"compareAndSetInt#(Ljava.lang.Object;JII)Z": function(thread, unsafeObj, oObj, offsetObj, expectedObj, xObj) {
 		let klclass = oObj.class;
@@ -224,9 +246,9 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 			} else {
 				oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
 			}
-			return new JInt(1);
+			return JBooleanTrue;
 		}
-		return new JInt(0);
+		return JBooleanFalse;
 	},
 	"compareAndSetLong#(Ljava.lang.Object;JJJ)Z": function(thread, unsafeObj, oObj, offsetObj, expectedObj, xObj) {
 		let klclass = oObj.class;
@@ -247,9 +269,9 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 			} else {
 				oObj.unsafeSetFieldValForOffset(klclass, offsetInt, xObj);
 			}
-			return new JInt(1);
+			return JBooleanTrue;
 		}
-		return new JInt(0);
+		return JBooleanFalse;
 	},
 	"storeFence#()V": function() {
 		// nothing
@@ -327,7 +349,7 @@ KLNativeImpls["java.lang.Double"] = {
 
 KLNativeImpls["java.lang.StringUTF16"] = {
 	"isBigEndian#()Z": function() {
-		return new JInt(1);
+		return new JBooleanTrue;
 	}
 };
 
@@ -362,3 +384,37 @@ KLNativeImpls["jdk.internal.reflect.Reflection"] = {
 		return JavaLangClassObjForClass(priorCallerClass);
 	}
 };
+
+const KLFD_stdin = 0;
+const KLFD_stdout = 1;
+const KLFD_stderr = 2;
+
+KLNativeImpls["java.io.FileDescriptor"] = {
+	"initIDs#()V": function() {	},
+	"getHandle#(I)J": function(thread, fdObj) {
+		let intId = fdObj.val;
+		switch (intId) {
+		case 0:
+			return new JLong(KLInt64FromNumber(KLFD_stdin));
+		case 1:
+			return new JLong(KLInt64FromNumber(KLFD_stdout));
+		case 2:
+			return new JLong(KLInt64FromNumber(KLFD_stderr));
+		}
+		return new JLong(KLInt64NegativeOne);
+	},
+	"getAppend#(I)Z": function(thread, fdObj) {
+		return JBooleanTrue;
+	}
+};
+
+KLNativeImpls["java.io.FileInputStream"] = {
+	"initIDs#()V": function() {	}
+	
+};
+
+KLNativeImpls["java.io.FileOutputStream"] = {
+	"initIDs#()V": function() {	}
+	
+};
+
