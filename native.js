@@ -56,6 +56,16 @@ KLNativeImpls["java.lang.Object"] = {
 	},
 	"hashCode#()I": function() {
 		return new JInt(1);
+	},
+	"notifyAll#()V": function() {
+		// nothing, since we only support one thread.
+	}
+};
+
+KLNativeImpls["java.lang.Throwable"] = {
+	"fillInStackTrace#(I)Ljava.lang.Throwable;": function(thread, throwableObj) {
+		// XXX Implement me.
+		return throwableObj;
 	}
 };
 
@@ -97,14 +107,18 @@ KLNativeImpls["java.lang.System"] = {
 			dest.elements[destPosInt + i] = intermediate[i];
 		}
 	},
-	"setIn0#(Ljava.io.InputStream;)V": function() {
-		
+	// Stream chicanery: these set the standard streams that in Java-land look like final static null:
+	"setIn0#(Ljava.io.InputStream;)V": function(thread, inputStreamObj) {
+		let klclass = ResolveClass("java.lang.System");
+		klclass.fieldVals["in"] = inputStreamObj;
 	}, 
-	"setOut0#(Ljava.io.PrintStream;)V": function() {
-		
+	"setOut0#(Ljava.io.PrintStream;)V": function(thread, outputStreamObj) {
+		let klclass = ResolveClass("java.lang.System");
+		klclass.fieldVals["out"] = outputStreamObj;
 	}, 
-	"setErr0#(Ljava.io.PrintStream;)V": function() {
-		
+	"setErr0#(Ljava.io.PrintStream;)V": function(thread, outputStreamObj) {
+		let klclass = ResolveClass("java.lang.System");
+		klclass.fieldVals["err"] = outputStreamObj;
 	}
 };
 
@@ -465,7 +479,24 @@ KLNativeImpls["java.io.FileInputStream"] = {
 };
 
 KLNativeImpls["java.io.FileOutputStream"] = {
-	"initIDs#()V": function() {	}
-	
+	"initIDs#()V": function() {	},
+	"writeBytes#([BIIZ)V": function(thread, streamObj, bObj, offObj, lenObj, appendObj) {
+		// For now assume these are UTF8 strings. Make a JS string of the byte array.
+		let offset = offObj.val;
+		let len = lenObj.val;
+		let outputStr = "";
+		for (let i = offset; i < offset + len; i++) {
+			let byte = bObj.elements[i].val;
+			let ch = String.fromCharCode(byte);
+			outputStr += ch;
+		}
+		console.log(outputStr);
+	}
 };
 
+KLNativeImpls["jdk.internal.misc.Signal"] = {
+	"findSignal0#(Ljava.lang.String;)I": function() {
+		// No currently supported OS signals.
+		return new JInt(-1);
+	}
+}

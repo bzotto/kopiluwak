@@ -32,7 +32,7 @@ function JObj(klclass) {
 	
 	this.str = function() { 
 		if (this.class.name == "java.lang.String") {
-			return 'JObj (java.lang.String): "'+ JSStringFromJavaLangStringObj(this) + '"'
+			return 'JObj (java.lang.String): "' + JSStringFromJavaLangStringObj(this) + '"';
 		} else {
 			return "JObj (" + this.class.name + ")";
 		}

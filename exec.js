@@ -44,8 +44,7 @@ function KLThreadContext(bootstrapMethod) {
 		let bt = DebugBacktrace(this);
 		console.log("Exception " + exceptionClassName + ": " + (message?message:"?") + "\n" + bt);
 		////
-		
-		
+				
 		let npeClass = ResolveClass(exceptionClassName);
 		let e = npeClass.createInstance();
 		this.stack[0].pendingException = e; // Not initialized yet but will be when we unwind back to it!
@@ -100,7 +99,7 @@ function KLThreadContext(bootstrapMethod) {
 				let handlerPC = HandlerPcForException(frame.method.class, pc, exception, frame.method.exceptions);
 				if (handlerPC >= 0) {
 					// We can handle this one. Blow away the stack and jump to the handler.
-					pc = handlerPC;
+					frame.pc = handlerPC;
 					frame.operandStack = [exception];
 				} else if (this.stack.length > 1) {
 					// Nope. Kaboom.
@@ -594,11 +593,11 @@ function KLThreadContext(bootstrapMethod) {
 		let methodRef = frame.method.class.methodReferenceFromIndex(index);
 		let method = ResolveMethodReference(methodRef, null);  // what's the right class param here?
 		if (!AccessFlagIsSet(method.access, ACC_STATIC)) {
-			thread.throwException("java.lang.IncompatibleClassChangeError");
+			thread.throwException("java.lang.IncompatibleClassChangeError", "Expected method " + FullyQualifiedMethodName(method) + " to be static.");
 			return;
 		}
 		if (AccessFlagIsSet(method.access, ACC_NATIVE) && !method.impl) {
-			thread.throwException("java.lang.UnsatisfiedLinkError");
+			thread.throwException("java.lang.UnsatisfiedLinkError", "Static native method " + FullyQualifiedMethodName(method) + " not implemented.");
 			return;
 		}
 		args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, methodRef);
@@ -619,6 +618,10 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		let objectref = frame.operandStack.pop();
+		if (objectref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException", "Can't call method " + methodRef.className + "." + methodRef.methodName + " on null object.");
+			return;
+		}
 		args.unshift(objectref);
 		// Generally, we want to invoke the named method on the object given, meaning by 
 		// looking directly at its class's vtable and using whatever matching entry we find, even
@@ -632,13 +635,20 @@ function KLThreadContext(bootstrapMethod) {
 		// object is the type of (or a subclass of the class of) the currently-executing method. That
 		// will ensure that, for example, a method on Object is not chosen incorectly becaue it is 
 		// the ancestor of *both* the object's class and the current method's classe. 
-		if (!objectref || !objectref.class) { debugger; }
 		let contextClass = objectref.class;
 		if ((objectref.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(objectref.class.name, frame.method.class.name)) && 
 			IsClassASubclassOf(frame.method.class.name, methodRef.className)) {
 			contextClass = null;
 		}
 		let method = ResolveMethodReference(methodRef, contextClass);  
+		if (!method || AccessFlagIsSet(method.access, ACC_ABSTRACT)) {
+			thread.throwException("java.lang.AbstractMethodError", "Failed to resolve non-abstract method for " + methodRef.className + "." + methodRef.methodName);
+			return;
+		}
+		if (AccessFlagIsSet(method.access, ACC_NATIVE) && !method.impl) {
+			thread.throwException("java.lang.UnsatisfiedLinkError", "Static native method " + FullyQualifiedMethodName(method) + " not implemented.");
+			return;	
+		}		
 		let childFrame = new KLStackFrame(method);		
 		childFrame.localVariables = args;
 		IncrementPC(frame, 3);
@@ -686,7 +696,7 @@ function KLThreadContext(bootstrapMethod) {
 			return;	
 		}
 		if (AccessFlagIsSet(method.access, ACC_NATIVE) && !method.impl) {
-			thread.throwException("java.lang.UnsatisfiedLinkError");
+			thread.throwException("java.lang.UnsatisfiedLinkError", "Interface native method " + FullyQualifiedMethodName(method) + " not implemented.");
 			return;	
 		}
 		let childFrame = new KLStackFrame(method);		
@@ -1679,13 +1689,7 @@ function KLThreadContext(bootstrapMethod) {
 		if (!ObjectIsA(objectref, "java.lang.Throwable")) {
 			debugger;
 		}
-		
-		// XXX DEBUG
-		let bt = DebugBacktrace(thread);
-		let message = objectref.fieldValsByClass["java.lang.Throwable"]["message"];
-		console.log("*** athrow of Exception " + objectref.class.name + ": " + (message?JSStringFromJavaLangStringObj(message):"?") + "\n" + bt);
-		////
-		
+				
 		// N.B. The pc doesn't change here, so the exception handler lookup will happen relative
 		// to this instruction.
 		frame.pendingException = objectref;

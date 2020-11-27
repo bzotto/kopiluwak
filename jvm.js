@@ -253,6 +253,10 @@ function ResolveMethodReference(methodRef, contextClass) {
 	return method;
 }
 
+function FullyQualifiedMethodName(method) {
+	return method.class.name + "." + method.name;
+}
+
 function FindMainMethod() {
 	let methodIdentifier = "main#([Ljava.lang.String;)V";
 	let method = null;
@@ -391,7 +395,7 @@ function HandlerPcForException(klclass, currentPC, exceptionObj, exceptionTable)
 			}
 			// Find target class
 			let targetClassRef = klclass.constantPool[exceptionEntry.catch_type];
-			let targetClassName = klclass.stringFromUtf8Constant(targetClassRef.name_index);
+			let targetClassName = klclass.classNameFromUtf8Constant(targetClassRef.name_index);
 			if (ObjectIsA(exceptionObj, targetClassName)) {
 				return exceptionEntry.handler_pc;
 			}
@@ -605,7 +609,7 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	if (initPhase1Method) {
 		let ctx = new KLThreadContext(initPhase1Method);
 		ctx.exec();
-		debugger;
+		// debugger;
 	}
 	
 	// Load the main class
