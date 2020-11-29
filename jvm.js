@@ -231,19 +231,62 @@ function DoesClassImplementInterface(className, interfaceName) {
 	return startClass.implementsInterface(interfaceName);
 }
 
-function ResolveMethodReference(methodRef, contextClass) {
-	// In general, we look for the method directly in the vtable of the contextClass, which is how overidden
-	// methods are implemented here, with each subclass getting a full vtable of its whole inheritance chain.
-	// The methodRef's class can also be an interface class if the method is a static method on the interface.
-	if (!contextClass) {
-		contextClass = ResolveClass(methodRef.className);
+function MatchMethodAmongSuperinterfaces(methodName, methodDescriptor, interfaceName) {
+	let methods = [];
+	let startInterface = ResolveClass(interfaceName);
+	if (!startInterface.isInterface()) { debugger; }
+	let method = startInterface.vtableEntry(methodName, methodDescriptor);
+	// Does this interface have a matching method?
+	// NB: The check for non-abstract is not really given in S5.4.3.3 where maximal specificity is defined, but it IS 
+	// expected when doing method search in invokespecial and invokevirtual, the only contexts where we use this logic.
+	if (method && 
+		!AccessFlagIsSet(method.access, ACC_PRIVATE) && 
+		!AccessFlagIsSet(method.access, ACC_STATIC), 
+		!AccessFlagIsSet(method.access, ACC_ABSTRACT)) { // see comment above re ABSTRACT
+		methods.push(method);
+	}
+	// Accumulate any matches in further superinterfaces. 
+	for (let superinterfaceName in startInterface.interfaces) {
+		methods = methods.concat(FindMethodInInterface(methodName, methodDescriptor, superinterfaceName));
+	}
+	return methods;
+}
+
+function FindSoleMaximallySpecifiedSuperinterfaceMethod(klclass, methodName, methodDescriptor) {
+	// Recursively look through all superinterfaces and their superinterfaces to find matching methods. We
+	// want to find all hits so we can determine whether there's only one.
+	let methods = [];
+	for (let superinterfaceName in klclass.interfaces) {
+		methods = methods.concat(MatchMethodAmongSuperinterfaces(methodName, methodDescriptor, superinterfaceName));
 	}
 	
+	if (methods.length == 1) {
+		return methods[0];
+	}
+	
+	return null;
+}
+
+// S2.9
+function IsMethodSignaturePolymorphic(method) {
+	if (method.class.name == "java.lang.invoke.MethodHandle" &&
+		method.descriptor.argumentCount() == 1 &&
+		method.descriptor.argumentTypeAtIndex(0).isIdenticalTo(new JType("[Ljava.lang.Object;")) &&
+		!method.descriptor.returnsVoid() && method.descriptor.returnType().isIdenticalTo(new JType("Ljava.lang.Object;")) &&
+		AccessFlagIsSet(method.access, ACC_VARARGS) && AccessFlagIsSet(method.access, ACC_NATIVE)) {
+		return true;
+	}
+	return false;
+}
+
+// XXX Now that the invoke* ops are following the book more precisely, this needs to be revisited, ie, what should this
+function ResolveMethodReference(methodRef) {
 	// Note that we don't resolve the method's own class, because we might be dealing with a subclass that the
 	// originating methodRef doesn't know about. The vtable on subclasses should already be setup to match
 	// inherited methods.
+	let klclass = ResolveClass(methodRef.className);
 	let methodIdentifier = methodRef.methodName + "#" + methodRef.descriptor;
-	var method = contextClass.vtable[methodIdentifier];
+	var method = klclass.vtable[methodIdentifier];
 	
 	if (!method) {
 		console.log("ERROR: Failed to resolve method " + methodRef.methodName + " in " + methodRef.className + " with descriptor " + methodRef.descriptor);

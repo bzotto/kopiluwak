@@ -48,7 +48,7 @@ function KLThreadContext(bootstrapMethod) {
 		let npeClass = ResolveClass(exceptionClassName);
 		let e = npeClass.createInstance();
 		this.stack[0].pendingException = e; // Not initialized yet but will be when we unwind back to it!
-		let initFrame = CreateObjInitFrameForObjectAndDescriptor(e, "(Ljava.lang.String;Ljava.lang.Throwable)V");
+		let initFrame = CreateObjInitFrameForObjectAndDescriptor(e, "(Ljava.lang.String;Ljava.lang.Throwable;)V");
 		initFrame.localVariables[0] = e;
 		initFrame.localVariables[1] = message ? JavaLangStringObjForJSString(message) : new JNull();
 		initFrame.localVariables[2] = cause ? cause : new JNull();
@@ -564,13 +564,12 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
-	function PrepareArgumentsByRemovingFromStackForMethod(stack, methodRef) {
+	function PrepareArgumentsByRemovingFromStackForMethod(stack, method) {
 		let args = [];
-		let descriptor = new KLMethodDescriptor(methodRef.descriptor);
-		let narg = descriptor.argumentCount();
+		let narg = method.descriptor.argumentCount();
 		// Walk backwards 
 		for (let i = (narg-1); i >= 0; i--) {
-			let argType = descriptor.argumentTypeAtIndex(i);
+			let argType = method.descriptor.argumentTypeAtIndex(i);
 			if (stack.length < 1) {
 				return null;
 			}
@@ -600,7 +599,7 @@ function KLThreadContext(bootstrapMethod) {
 			thread.throwException("java.lang.UnsatisfiedLinkError", "Static native method " + FullyQualifiedMethodName(method) + " not implemented.");
 			return;
 		}
-		args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, methodRef);
+		args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, method);
 		if (args == null) {
 			debugger;
 		}
@@ -610,52 +609,110 @@ function KLThreadContext(bootstrapMethod) {
 		thread.pushFrame(childFrame);
 	}
 	
-	const instr_invokevirtual = function(frame, opcode, thread) {
+	this.instructionHandlers[INSTR_invokevirtual] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
 		let methodRef = frame.method.class.methodReferenceFromIndex(index);
-		let args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, methodRef);
-		if (args == null) {
+		let resolvedMethod = ResolveMethodReference(methodRef);  
+		
+		if (IsMethodSignaturePolymorphic(resolvedMethod)) {
+			// XXX We don't know how to do this yet.
 			debugger;
 		}
+		
+		// Pull args off the stack based on the resolve method's descriptor, even if we end up selecting a 
+		// different thing to actually invoke. We need to use *something* to determine the number of args to pull
+		// of the stack before we can get to the objectref, which we need to find the chosen method.
+		let args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, resolvedMethod);
+		if (args == null) { debugger; } 
+		
+		
 		let objectref = frame.operandStack.pop();
 		if (objectref.isa.isNull()) {
 			thread.throwException("java.lang.NullPointerException", "Can't call method " + methodRef.className + "." + methodRef.methodName + " on null object.");
 			return;
 		}
 		args.unshift(objectref);
-		// Generally, we want to invoke the named method on the object given, meaning by 
-		// looking directly at its class's vtable and using whatever matching entry we find, even
-		// if it reflects an override in a subclass from what is actually referenced. The only
-		// time we want to *strictly* resolve the method in the actual class referenced is when 
-		// the currently executing method's class is referencing a method in one of its own superclasses--
-		// because the compiler would have had knowledge of the override within the class and chose the
-		// specific non-overridden version. 
-		//
-		// This condition alone is not enough, though, because it must also be true that the given 
-		// object is the type of (or a subclass of the class of) the currently-executing method. That
-		// will ensure that, for example, a method on Object is not chosen incorectly becaue it is 
-		// the ancestor of *both* the object's class and the current method's classe. 
-		let contextClass = objectref.class;
-		if ((objectref.isa.isIdenticalTo(frame.method.class.typeOfInstances) || IsClassASubclassOf(objectref.class.name, frame.method.class.name)) && 
-			IsClassASubclassOf(frame.method.class.name, methodRef.className)) {
-			contextClass = null;
+		
+		let classC = objectref.class;
+		let method = classC.vtableEntry(resolvedMethod.name, resolvedMethod.descriptor);
+		if (!method) {
+			let soleMaximallySpecifiedMethod = FindSoleMaximallySpecifiedSuperinterfaceMethod(resolvedMethod.name, resolvedMethod.descriptor);
+			if (!AccessFlagIsSet(soleMaximallySpecifiedMethod, ACC_ABSTRACT)) {
+				method = soleMaximallySpecifiedMethod;
+			}
 		}
-		let method = ResolveMethodReference(methodRef, contextClass);  
-		if (!method || AccessFlagIsSet(method.access, ACC_ABSTRACT)) {
-			thread.throwException("java.lang.AbstractMethodError", "Failed to resolve non-abstract method for " + methodRef.className + "." + methodRef.methodName);
+		if (AccessFlagIsSet(method.access, ACC_ABSTRACT)) {
+			thread.throwException("java.lang.AbstractMethodError", "Selected method is abstract and cannot be invoked");
 			return;
 		}
 		if (AccessFlagIsSet(method.access, ACC_NATIVE) && !method.impl) {
-			thread.throwException("java.lang.UnsatisfiedLinkError", "Static native method " + FullyQualifiedMethodName(method) + " not implemented.");
+			thread.throwException("java.lang.UnsatisfiedLinkError", "Native method " + FullyQualifiedMethodName(method) + " not implemented.");
 			return;	
 		}		
+		
 		let childFrame = new KLStackFrame(method);		
 		childFrame.localVariables = args;
 		IncrementPC(frame, 3);
 		thread.pushFrame(childFrame);
 	}
-	this.instructionHandlers[INSTR_invokevirtual] = instr_invokevirtual;
-	this.instructionHandlers[INSTR_invokespecial] = instr_invokevirtual;
+	
+	this.instructionHandlers[INSTR_invokespecial] = function(frame, opcode, thread) {
+		let index = U16FromInstruction(frame);
+		let methodRef = frame.method.class.methodReferenceFromIndex(index);
+		let resolvedMethod = ResolveMethodReference(methodRef);  
+		
+		// if (AccessFlagIsSet(method.access, ACC_PROTECTED) ... 
+			
+		let classC; 
+		if (resolvedMethod.name != "<init>" && 
+			!resolvedMethod.class.isInterface() && 
+			IsClassASubclassOf(frame.method.class.name, resolvedMethod.class.name) &&
+			AccessFlagIsSet(frame.method.class.accessFlags, ACC_SUPER)) {
+			classC = frame.method.class.superclass;
+		} else {
+			classC = resolvedMethod.class;
+		}
+		
+		let method = classC.vtableEntry(resolvedMethod.name, resolvedMethod.descriptor);
+		if (!method) {
+			let objectClass = ResolveClass("java.lang.Object");
+			let objectMethod = objectClass.vtableEntry(resolvedMethod.name, resolvedMethod.descriptor);
+			if (classC.isInterface() && objectMethod && AccessFlagIsSet(objectMethod.access, ACC_PUBLIC)) {
+				method = objectMethod;
+			}
+		}
+		
+		if (!method) {
+			let soleMaximallySpecifiedMethod = FindSoleMaximallySpecifiedSuperinterfaceMethod(resolvedMethod.name, resolvedMethod.descriptor);
+			if (!AccessFlagIsSet(soleMaximallySpecifiedMethod, ACC_ABSTRACT)) {
+				method = soleMaximallySpecifiedMethod;
+			}
+		}
+		
+		if (AccessFlagIsSet(method.access, ACC_ABSTRACT)) {
+			thread.throwException("java.lang.AbstractMethodError", "Selected method is abstract and cannot be invoked");
+			return;
+		}
+		if (AccessFlagIsSet(method.access, ACC_NATIVE) && !method.impl) {
+			thread.throwException("java.lang.UnsatisfiedLinkError", "Native method " + FullyQualifiedMethodName(method) + " not implemented.");
+			return;	
+		}		
+			
+		let args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, method);
+		if (args == null) { debugger; } 
+		
+		let objectref = frame.operandStack.pop();
+		if (objectref.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException", "Can't call method " + methodRef.className + "." + methodRef.methodName + " on null object.");
+			return;
+		}
+		args.unshift(objectref);
+		
+		let childFrame = new KLStackFrame(method);		
+		childFrame.localVariables = args;
+		IncrementPC(frame, 3);
+		thread.pushFrame(childFrame);
+	}
 		
 	this.instructionHandlers[INSTR_invokeinterface] = function(frame, opcode, thread) {
 		let index = U16FromInstruction(frame);
@@ -664,29 +721,38 @@ function KLThreadContext(bootstrapMethod) {
 		if (!methodRef.isInterface) {
 			debugger;
 		}
-		let args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, methodRef);
+		let resolvedMethod = ResolveMethodReference(methodRef);
+		if (!resolvedMethod) {
+			thread.throwException("java.lang.AbstractMethodError");
+			return;
+		}
+		if (resolvedMethod.name == "<init>" || resolvedMethod.name == "<clinit>") {
+			debugger;
+		}
+		if (count == 0) {
+			debugger;
+		}
+		let args = PrepareArgumentsByRemovingFromStackForMethod(frame.operandStack, resolvedMethod);
 		if (args == null) {
 			debugger; // static type safety error or internal stack management error.
 		}
 		let objectref = frame.operandStack.pop();
-		args.unshift(objectref);
 		if (objectref.isa.isNull()) {
 			thread.throwException("java.lang.NullPointerException");
 			return;
 		}
-		if (!objectref.isa.isOrdinaryClass() && !objectref.isa.isArray()) {
+		if (!objectref.isa.isReferenceType()) {
 			debugger;
 		}
-		if (!objectref.class.implementsInterface(methodRef.className)) {
+		let classC = objectref.class;
+		let method = classC.vtableEntry(resolvedMethod.name, resolvedMethod.descriptor);
+		if (!method) {
+			method = FindSoleMaximallySpecifiedSuperinterfaceMethod(resolvedMethod.name, resolvedMethod.descriptor);
+		}
+		if (!classC.implementsInterface(methodRef.className)) {
 			thread.throwException("java.lang.IncompatibleClassChangeError");
 			return;
 		}		
-		// XXX Resolve. This doesn't really implment step 3 lookup. 
-		let method = ResolveMethodReference(methodRef, objectref.class);
-		if (!method) {
-			thread.throwException("java.lang.AbstractMethodError");
-			return;
-		}
 		if (!AccessFlagIsSet(method.access, ACC_PUBLIC)) {
 			thread.throwException("java.lang.IllegalAccessError");
 			return;	
@@ -699,6 +765,8 @@ function KLThreadContext(bootstrapMethod) {
 			thread.throwException("java.lang.UnsatisfiedLinkError", "Interface native method " + FullyQualifiedMethodName(method) + " not implemented.");
 			return;	
 		}
+		// OK, call it.
+		args.unshift(objectref);
 		let childFrame = new KLStackFrame(method);		
 		childFrame.localVariables = args;
 		IncrementPC(frame, 5);

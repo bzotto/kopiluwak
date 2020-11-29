@@ -332,6 +332,10 @@ function KLClassLoader(classFileHexStringOrBytes) {
 
 		let className = stringFromUtf8Constant(ConstantPool[thisClass].name_index).replace(/\//g, ".");
 		let superClassName = superClass == 0 ? null : stringFromUtf8Constant(ConstantPool[superClass].name_index).replace(/\//g, ".");
+			
+		if (AccessFlagIsSet(accessFlags, ACC_INTERFACE) && superClassName != "java.lang.Object") {
+			return { "error": "Interface must have Object as direct superclass."};
+		}
 
 		let loadedClass = new KLLoadedClass(className, superClassName, accessFlags, ConstantPool, interfaces, fields, methods, attributes);
 		return { "loadedClass": loadedClass };

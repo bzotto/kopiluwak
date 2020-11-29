@@ -349,6 +349,11 @@ function KLClass(loadedOrArrayClass, superclass) {
 		return null;
 	}
 	
+	this.vtableEntry = function(methodName, methodDescriptor) {
+		let identifier = methodName + "#" + methodDescriptor.descriptorString();
+		return this.vtable[identifier];
+	}
+	
 	// Array-specific routines
 	this.arrayDimensions = function() {
 		if (!this.isArray()) {
