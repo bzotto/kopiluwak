@@ -13,10 +13,11 @@ function KLStackFrame(method) {
 	this.completionHandlers = [];
 }
 
-function KLThreadContext(bootstrapMethod) {
+function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 
 	this.stack = [];
 	this.javaThreadObj = null;
+	this.returnValue = null;
 	
 	this.pushFrame = function(frame) {
 		this.stack.unshift(frame);
@@ -87,8 +88,6 @@ function KLThreadContext(bootstrapMethod) {
 	this.exec = function() {
 		while (this.stack.length > 0) {
 			let frame = this.stack[0];
-			let code = frame.method.code;
-			let pc = frame.pc;	
 			
 			// If there's a pending exception in this frame, look for a handler for it at our current
 			// pc and either go there first, or continue down the stack. 
@@ -96,7 +95,7 @@ function KLThreadContext(bootstrapMethod) {
 				let exception = frame.pendingException;
 				frame.pendingException = null;
 			
-				let handlerPC = HandlerPcForException(frame.method.class, pc, exception, frame.method.exceptions);
+				let handlerPC = HandlerPcForException(frame.method.class, frame.pc, exception, frame.method.exceptions);
 				if (handlerPC >= 0) {
 					// We can handle this one. Blow away the stack and jump to the handler.
 					frame.pc = handlerPC;
@@ -119,7 +118,7 @@ function KLThreadContext(bootstrapMethod) {
 			// Are we at the top of a method? If so, a couple special cases are handled now:
 			// 1. If this method is part of a class which has not yet been initialized.
 			// 2. If this method is native and either has a bound implementation that is not bytecode or has no implementation.
-			if (pc == 0) {
+			if (frame.pc == 0) {
 				// If we are starting to execute a method contained in a class which is not yet initialized, then 
 				// stop and initialize the class if appropriate. We check this first, because we'll need to do this 
 				// whether or not the method itself has a native implementation.
@@ -140,7 +139,7 @@ function KLThreadContext(bootstrapMethod) {
 				
 				// If this is a native method, either execute it or if not present, pretend it executed and returned
 				// some default value. 
-				if ((frame.method.access & ACC_NATIVE) != 0 || code == null) { // XXX the code==null condition just helps us with mock objects
+				if ((frame.method.access & ACC_NATIVE) != 0 || frame.method.code == null) { // XXX the code==null condition just helps us with mock objects
 					// Check if this is a native method we don't support. If so, log it and return a default value.
 					if (frame.method.impl) {
 						// Marshal the thread context and arguments for the native implementation. 
@@ -180,16 +179,16 @@ function KLThreadContext(bootstrapMethod) {
 				}	
 			}
 			
-			if (!code) { debugger; }
+			if (!frame.method.code) { debugger; }
 			
 			// Verify that the pc is valid. 
-			if (pc < 0 || pc >= code.length) {
+			if (frame.pc < 0 || frame.pc >= frame.method.length) {
 				console.log("JVM: Error: pc " + pc + " invalid for method " + this.currentFQMethodName());
 				return;
 			}
 						
 			// Fetch and execute the next instruction.
-			let opcode = code[pc];
+			let opcode = frame.method.code[frame.pc];
 			
 			// 		    let str = Number(opcode).toString(16);
 			// 		    str = str.length == 1 ? "0x0" + str : "0x" + str;
@@ -214,6 +213,9 @@ function KLThreadContext(bootstrapMethod) {
 	
 	if (bootstrapMethod) {
 		let baseFrame = new KLStackFrame(bootstrapMethod);
+		if (bootstrapArgs) {
+			baseFrame.localVariables = bootstrapArgs.slice();
+		}
 		this.stack.push(baseFrame);
 	}
 	
@@ -765,7 +767,6 @@ function KLThreadContext(bootstrapMethod) {
 			thread.throwException("java.lang.UnsatisfiedLinkError", "Interface native method " + FullyQualifiedMethodName(method) + " not implemented.");
 			return;	
 		}
-		// OK, call it.
 		args.unshift(objectref);
 		let childFrame = new KLStackFrame(method);		
 		childFrame.localVariables = args;
@@ -804,7 +805,11 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		thread.popFrame();
-		thread.stack[0].operandStack.push(value);
+		if (thread.stack.length > 0) {
+			thread.stack[0].operandStack.push(value);
+		} else {
+			thread.returnValue = value;
+		}
 	}
 	
 	this.instructionHandlers[INSTR_areturn] = function(frame, opcode, thread) {
@@ -813,7 +818,11 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		thread.popFrame();
-		thread.stack[0].operandStack.push(objectref);
+		if (thread.stack.length > 0) {
+			thread.stack[0].operandStack.push(objectref);
+		} else {
+			thread.returnValue = objectref;
+		}
 	}
 	
 	this.instructionHandlers[INSTR_freturn] = function(frame, opcode, thread) {
@@ -822,7 +831,11 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		thread.popFrame();
-		thread.stack[0].operandStack.push(value);
+		if (thread.stack.length > 0) {
+			thread.stack[0].operandStack.push(value);
+		} else {
+			thread.returnValue = value;
+		}
 	}
 	
 	this.instructionHandlers[INSTR_dreturn] = function(frame, opcode, thread) {
@@ -831,7 +844,11 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		thread.popFrame();
-		thread.stack[0].operandStack.push(value);
+		if (thread.stack.length > 0) {
+			thread.stack[0].operandStack.push(value);
+		} else {
+			thread.returnValue = value;
+		}
 	}
 	
 	this.instructionHandlers[INSTR_lreturn] = function(frame, opcode, thread) {
@@ -840,7 +857,11 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}
 		thread.popFrame();
-		thread.stack[0].operandStack.push(value);
+		if (thread.stack.length > 0) {
+			thread.stack[0].operandStack.push(value);
+		} else {
+			thread.returnValue = value;
+		}
 	}
 	
 	const instr_iload_n = function(frame, opcode) {
@@ -1274,9 +1295,35 @@ function KLThreadContext(bootstrapMethod) {
 		IncrementPC(frame, 1);
 	}
 	
+	this.instructionHandlers[INSTR_i2d] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isInt()) {
+			debugger;
+		}
+		let result = new JDouble(value.val);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
 	this.instructionHandlers[INSTR_f2i] = function(frame) {
 		let value = frame.operandStack.pop();
 		if (!value.isa.isFloat()) {
+			debugger;
+		}
+		let intResult;
+		if (value.isNaN()) {
+			intResult = 0;
+		} else {
+			intResult = Math.trunc(value.val);
+		}
+		let result = new JInt(intResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);		
+	}
+		
+	this.instructionHandlers[INSTR_d2i] = function(frame) {
+		let value = frame.operandStack.pop();
+		if (!value.isa.isDouble()) {
 			debugger;
 		}
 		let intResult;
@@ -1558,6 +1605,18 @@ function KLThreadContext(bootstrapMethod) {
 			debugger;
 		}				
 		let doubleResult = value1.val / value2.val;
+		let result = new JDouble(doubleResult);
+		frame.operandStack.push(result);
+		IncrementPC(frame, 1);
+	}
+	
+	this.instructionHandlers[INSTR_dmul] = function(frame) {
+		let value2 = frame.operandStack.pop();
+		let value1 = frame.operandStack.pop();
+		if (!value1.isa.isDouble() || !value2.isa.isDouble()) {
+			debugger;
+		}				
+		let doubleResult = value1.val * value2.val;
 		let result = new JDouble(doubleResult);
 		frame.operandStack.push(result);
 		IncrementPC(frame, 1);

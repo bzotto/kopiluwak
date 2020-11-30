@@ -42,6 +42,14 @@ KLNativeImpls["java.lang.Class"] = {
 			return JBooleanFalse;
 		}
 	},
+	"isArray#()Z": function(thread, classObj) {
+		let classClass = classObj.meta.classClass;
+		if (classClass && classClass.isArray()) {
+			return JBooleanTrue;
+		} else {
+			return JBooleanFalse;
+		}
+	},
 	"getDeclaredConstructors0#(Z)[Ljava.lang.reflect.Constructor;": function(thread, classObj, publicObj) {
 		// XXX This just returns an empty array, but this is not correct.
 		let klclass = ResolveClass("[Ljava.lang.reflect.Constructor;");
@@ -119,6 +127,14 @@ KLNativeImpls["java.lang.System"] = {
 	"setErr0#(Ljava.io.PrintStream;)V": function(thread, outputStreamObj) {
 		let klclass = ResolveClass("java.lang.System");
 		klclass.fieldVals["err"] = outputStreamObj;
+	},
+	"mapLibraryName#(Ljava.lang.String;)Ljava.lang.String;": function(thread, libnameObj) {
+		let libname = JSStringFromJavaLangStringObj(libnameObj);
+		let mappedName = JavaLangStringObjForJSString("KL->" + libname);
+		return mappedName;
+	},
+	"identityHashCode#(Ljava.lang.Object;)I": function() {
+		return new JInt(1);
 	}
 };
 
@@ -170,6 +186,8 @@ KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
 		props.push(JavaLangStringObjForJSString("/"));
 		props.push(JavaLangStringObjForJSString("java.io.tmpdir"));
 		props.push(JavaLangStringObjForJSString("/"));	
+		props.push(JavaLangStringObjForJSString("java.security.manager"));
+		props.push(JavaLangStringObjForJSString("disallow"));	
 		props.push(new JNull());
 		props.push(new JNull());
 			
@@ -190,6 +208,12 @@ KLNativeImpls["jdk.internal.util.SystemProps$Raw"] = {
  		props.elements[21] = JavaLangStringObjForJSString(navigator.appName); // _os_name_NDX
  		props.elements[22] = JavaLangStringObjForJSString(navigator.userAgent); // _os_version_NDX
  		props.elements[23] = JavaLangStringObjForJSString("/"); // _os_version_NDX
+		props.elements[31] = JavaLangStringObjForJSString("UTF-8"); // _sun_io_unicode_encoding_NDX
+		props.elements[32] = JavaLangStringObjForJSString("UTF-8"); // _sun_jnu_encoding_NDX
+		props.elements[35] = JavaLangStringObjForJSString("UTF-8"); // _sun_stderr_encoding_NDX
+		props.elements[36] = JavaLangStringObjForJSString("UTF-8"); // _sun_stdout_encoding_NDX
+		
+		
 		return props;
 	
 		/* see jdk.internal.util.SystemProps for this ordered list:
@@ -380,6 +404,14 @@ KLNativeImpls["jdk.internal.misc.Unsafe"] = {
 			debugger;
 		}
 		return currentVal;
+	},
+	"ensureClassInitialized0#(Ljava.lang.Class;)V": function(thread, unsafeObj, classObj) {
+		let classClass = classObj.meta.classClass;
+		let clinitFrame = CreateClassInitFrameIfNeeded(classClass);
+		if (clinitFrame) {
+			clinitFrame.method.class.state = KLCLASS_STATE_INITIALIZING;
+			thread.pushFrame(clinitFrame);
+		}
 	}
 };
 
@@ -447,6 +479,10 @@ KLNativeImpls["jdk.internal.reflect.Reflection"] = {
 		}
 		let priorCallerClass = priorCaller.class;
 		return JavaLangClassObjForClass(priorCallerClass);
+	},
+	"getClassAccessFlags#(Ljava.lang.Class;)I": function(thread, classObj) {
+		let classClass = classObj.meta.classClass;
+		return new JInt(classClass.accessFlags);
 	}
 };
 
@@ -498,5 +534,49 @@ KLNativeImpls["jdk.internal.misc.Signal"] = {
 	"findSignal0#(Ljava.lang.String;)I": function() {
 		// No currently supported OS signals.
 		return new JInt(-1);
+	}
+}
+
+KLNativeImpls["java.io.UnixFileSystem"] = {
+	"initIDs#()V": function() {	},
+	"getBooleanAttributes0#(Ljava.io.File;)I": function() {
+		return new JInt(0);
+	}
+};
+	
+KLNativeImpls["sun.nio.fs.UnixNativeDispatcher"] = {
+	"init#()I": function() {
+		return new JInt(0);
+	},
+	"getcwd#()[B": function() {
+		let klclass = ResolveClass("[B");
+		let jarray = new JArray(klclass, 1);
+		jarray.elements[0] = new JInt('/');
+		return jarray;
+	}
+}
+
+KLNativeImpls["jdk.internal.loader.BootLoader"] = {
+	"setBootLoaderUnnamedModule0#(Ljava.lang.Module;)V": function() {
+		// nothing.
+	}
+}
+
+KLNativeImpls["jdk.internal.loader.NativeLibraries"] = {
+	"findBuiltinLib#(Ljava.lang.String;)Ljava.lang.String;": function() {
+		return new JNull();
+	}
+}
+
+KLNativeImpls["java.lang.reflect.Array"] = {
+	"newArray#(Ljava.lang.Class;I)Ljava.lang.Object;": function(thread, classObj, lengthObj) {
+		if (classObj.isa.isNull()) {
+			thread.throwException("java.lang.NullPointerException", "Cannot create array of null component type");
+			return;
+		}
+		let classClass = classObj.meta.classClass;
+		let arrayClass = CreateArrayClassFromName("[" + classClass.type.descriptorString());
+		let jarray = new JArray(arrayClass, lengthObj.val);
+		return jarray;
 	}
 }

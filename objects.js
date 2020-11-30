@@ -131,6 +131,7 @@ function JFloat(val) {
 function JDouble(val) {
 	this.isa = new JType(JTYPE_DOUBLE);
 	this.val = (val != undefined) ? val : +0.0;
+	this.isNaN = function() { return isNaN(this.val); }
 	this.str = function() { return "JDouble: " + this.val; }
 }
 

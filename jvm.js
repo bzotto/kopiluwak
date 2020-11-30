@@ -617,36 +617,8 @@ function KLClassFromLoadedClass(loadedClass) {
 	return klclass;
 }
 
-function InjectOutputMockObjects() {
-		
-	// Stuff that lets us print stuff to the console.
-	var javaIoPrintStreamLoadedClass = new KLLoadedClass("java.io.PrintStream", "java.lang.Object", 0, [], [], [], [], []);
-	var javaIoPrintStreamJclass = new KLClass(javaIoPrintStreamLoadedClass);
-	javaIoPrintStreamJclass.vtable["println#(Ljava.lang.String;)V"] = { "name": "println", "class": javaIoPrintStreamJclass, "descriptor": new KLMethodDescriptor("(Ljava.lang.String;)V"), "access": ACC_PUBLIC, "code": null, "impl":
-		function(jobj, x) {
-			console.log(JSStringFromJavaLangStringObj(x));
-		}
-	};
-	javaIoPrintStreamJclass.vtable["println#(I)V"] = { "name": "println", "class": javaIoPrintStreamJclass, "descriptor": new KLMethodDescriptor("(I)V"), "access": ACC_PUBLIC, "code": null, "impl":
-		function(jobj, x) {
-			console.log(x.val);
-		}
-	};
-	AddClass(javaIoPrintStreamJclass);
-	var systemOutStreamObj = javaIoPrintStreamJclass.createInstance();
-
-	var javaLangSystemLoadedClass = new KLLoadedClass("java.lang.System", "java.lang.Object", 0, [], [], [], [], []);
-	var javaLangSystemJclass = new KLClass(javaLangSystemLoadedClass);
-	javaLangSystemJclass.fields["out"] = { "type": new JType("Ljava.io.PrintStream;"), "access": ACC_PUBLIC|ACC_STATIC};
-	javaLangSystemJclass.fieldValsByClass["java.lang.System"]["out"] = systemOutStreamObj;
-	AddClass(javaLangSystemJclass);
-}
-
 function LoadClassAndExecute(mainClassHex, otherClassesHex) {
-	
-	// Inject system crap so we don't need JDK for super simple tests
-	// InjectOutputMockObjects();
-	
+		
 	//Create the VM startup thread.
 	let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
 	if (initPhase1Method) {
@@ -654,6 +626,13 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 		ctx.exec();
 		// debugger;
 	}
+	
+	// let initPhase2Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase2", "descriptor": "(ZZ)I"});
+	// if (initPhase2Method) {
+	// 	let ctx = new KLThreadContext(initPhase2Method, [JBooleanFalse, JBooleanFalse]);
+	// 	ctx.exec();
+	// 	// debugger;
+	// }
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();
