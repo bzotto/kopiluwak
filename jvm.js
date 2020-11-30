@@ -20,14 +20,14 @@ function AddClass(klclass) {
 		let superclass = ResolveClass(klclass.superclassName);
 	
 		if (!superclass) {
-			console.log("JVM: Cannot load " + klclass.name + " before superclass " + klclass.superclassName);
+			KLLogWarn("Cannot load " + klclass.name + " before superclass " + klclass.superclassName);
 			return;
 		}
 	
 		klclass.superclass = superclass;
 	}
 	LoadedClasses.push(klclass);	
-	console.log("JVM: Loaded class " + klclass.name);
+	KLLogInfo("Loaded class " + klclass.name);
 }
 
 function LoadClassFromJDK(className) {
@@ -43,7 +43,7 @@ function LoadClassFromJDK(className) {
 			let classLoader = new KLClassLoader();
 			let clresult = classLoader.loadFromData(bytes);
 			if (clresult.error) {
-				console.log("ERROR: Failed to load JDK class " + className + ": " + clresult.error);
+				KLLogWarn("Failed to load JDK class " + className + ": " + clresult.error);
 				return null;
 			}
 			let loadedClass = clresult.loadedClass;
@@ -114,7 +114,7 @@ function ResolveClass(className) {
 		return jdkClass;
 	}
 		
-	console.log("ERROR: Failed to resolve class " + className);
+	KLLogWarn("Failed to resolve class " + className);
 	return null;
 }
 
@@ -289,7 +289,7 @@ function ResolveMethodReference(methodRef) {
 	var method = klclass.vtable[methodIdentifier];
 	
 	if (!method) {
-		console.log("ERROR: Failed to resolve method " + methodRef.methodName + " in " + methodRef.className + " with descriptor " + methodRef.descriptor);
+		KLLogWarn("Failed to resolve method " + methodRef.methodName + " in " + methodRef.className + " with descriptor " + methodRef.descriptor);
 		return null;
 	} 
 	
@@ -323,7 +323,7 @@ function ResolveFieldReference(fieldRef) {
 	let klclass = ResolveClass(fieldRef.className);
 	
 	if (klclass == null) {
-		console.log("ERROR: Failed to resolve class " + fieldRef.className);
+		KLLogWarn("Failed to resolve class " + fieldRef.className);
 		return null;
 	}
 	
@@ -338,21 +338,12 @@ function ResolveFieldReference(fieldRef) {
 	// the desc match, it's a failure, even if in theory there may be a superclass which 
 	// defines a field with the same name and the correct type. 
 	if (!field || field.type.descriptorString() != fieldRef.descriptor) {
-		console.log("ERROR: Failed to resolve field " + fieldRef.fieldName + " in " + 
+		KLLogWarn("Failed to resolve field " + fieldRef.fieldName + " in " + 
 			fieldRef.className + " with descriptor " + fieldRef.descriptor);
 		return {};
 	}
 	
 	return { "name": fieldRef.fieldName, "class": fieldClass, "field": field };
-}
-
-function Signed16bitValFromTwoBytes(val1, val2) {
-	let sign = val1 & (1 << 7);
-	let x = (((val1 & 0xFF) << 8) | (val2 & 0xFF));
-	if (sign) {
-		return (0xFFFF0000 | x);
-	} 
-	return x;
 }
 
 function ObjectIsA(jobj, className) {
@@ -480,7 +471,7 @@ function DebugBacktrace(threadContext) {
 		}	
 		backtrace += "\n";
 	}
-	console.log(backtrace);
+	KLLogInfo(backtrace);
 }
 
 function CreateClassInitFrameIfNeeded(klclass) {
@@ -619,6 +610,8 @@ function KLClassFromLoadedClass(loadedClass) {
 
 function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 		
+	KLLogInfo("Kopiluwak JVM startup: executing java.lang.System.initPhase1");
+		
 	//Create the VM startup thread.
 	let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
 	if (initPhase1Method) {
@@ -627,12 +620,17 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 		// debugger;
 	}
 	
+	KLLogInfo("JVM: Completed java.lang.System.initPhase1");
+	
+	
 	// let initPhase2Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase2", "descriptor": "(ZZ)I"});
 	// if (initPhase2Method) {
 	// 	let ctx = new KLThreadContext(initPhase2Method, [JBooleanFalse, JBooleanFalse]);
 	// 	ctx.exec();
 	// 	// debugger;
 	// }
+	
+	KLLogInfo("JVM: Loading entry point class");
 	
 	// Load the main class
 	let classLoader = new KLClassLoader();
@@ -660,6 +658,9 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	if (mainMethod) {
 		let ctx = new KLThreadContext(mainMethod);
 		ctx.exec();
+		
+		KLLogInfo("JVM: Execution completed");
+		
 	} else {
 		return "Didn't find main method entry point"
 	}

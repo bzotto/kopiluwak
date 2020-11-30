@@ -191,7 +191,7 @@ function JType(typeOrDescriptor) {
 	if (typeof typeOrDescriptor == 'number') {
 		let type = typeOrDescriptor;
 		if (type != JTYPE_NULL && (type < 4 || type > 12)) {
-			console.log("JType: can't create with numeric type " + type);
+			KLLogError("JType: can't create with numeric type " + type);
 			type = JTYPE_NULL;
 		}
 		this.type = type;
@@ -274,7 +274,7 @@ function JTypeFromJVMArrayType(atype) {
 function KLMethodDescriptor(descriptorString) {
 	
 	if (descriptorString[0] != '(') {
-		console.log("Cannot create KLMethodDescriptor with non-method desc " + descriptorString + ", using (void)void");
+		KLLogError("Cannot create KLMethodDescriptor with non-method desc " + descriptorString + ", using (void)void");
 		descriptorString = "()V";
 	}
 	

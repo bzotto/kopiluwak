@@ -41,10 +41,10 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 	// Exception class name is required; message (JS string) and cause (Throwable jobject) are optional.
 	this.throwException = function(exceptionClassName, message, cause) {
 		
-		// XXX Debug dump
-		let bt = DebugBacktrace(this);
-		console.log("Exception " + exceptionClassName + ": " + (message?message:"?") + "\n" + bt);
-		////
+		// // XXX Debug dump
+		// let bt = DebugBacktrace(this);
+		// console.log("Exception " + exceptionClassName + ": " + (message?message:"?") + "\n" + bt);
+		// ////
 				
 		let npeClass = ResolveClass(exceptionClassName);
 		let e = npeClass.createInstance();
@@ -109,7 +109,7 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 					// Nowhere left to throw... 
 					let jmessage = exception.fieldValsByClass["java.lang.Throwable"]["detailMessage"];
 					let message = (jmessage && !jmessage.isa.isNull()) ? JSStringFromJavaLangStringObj(jmessage) : "(unknown)";
-					console.log("JVM: Java thread terminated due to unhandled exception " + exception.class.name + ":\n\t" + message);
+					KLLogInfo("JVM: Java thread terminated due to unhandled exception " + exception.class.name + ":\n\t" + message);
 					return; 
 				}
 				
@@ -167,7 +167,7 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 							}
 						}
 					} else {				
-						console.log("JVM: Eliding native method " + frame.method.class.name + "." + frame.method.name + " (desc: " + frame.method.descriptor.descriptorString() + ")");
+						KLLogWarn("Eliding native method " + frame.method.class.name + "." + frame.method.name + " (desc: " + frame.method.descriptor.descriptorString() + ")");
 						let nativeFrame = this.popFrame();
 						if (!nativeFrame.method.descriptor.returnsVoid()) {
 							let returnType = nativeFrame.method.descriptor.returnType();
@@ -183,7 +183,7 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 			
 			// Verify that the pc is valid. 
 			if (frame.pc < 0 || frame.pc >= frame.method.length) {
-				console.log("JVM: Error: pc " + pc + " invalid for method " + this.currentFQMethodName());
+				KLLogError("JVM: Error: pc " + pc + " invalid for method " + this.currentFQMethodName());
 				return;
 			}
 						

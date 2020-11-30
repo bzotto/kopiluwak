@@ -144,7 +144,7 @@ function KLClassLoader(classFileHexStringOrBytes) {
 					break;
 				}
 		default:
-			console.log("classloader: unsupported constant type " + tag);
+			KLLogError("classloader: unsupported constant type " + tag);
 			return null;
 		}
 	
