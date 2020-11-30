@@ -10,6 +10,10 @@ const KLogLevelInfo = 0;
 const KLogLevelWarn = 1;
 const KLogLevelError = 2;
 
+let KLLogOutputFn = function(msg) {
+	console.log(msg);
+}
+
 function KLLog(msg, level) {
 	if (level == undefined) {
 		level = KLogLevelInfo;
@@ -29,7 +33,7 @@ function KLLog(msg, level) {
 		break;
 	}
 	
-	console.log(outstr + msg);
+	KLLogOutputFn(outstr + msg);
 }
 
 function KLLogInfo(msg) {

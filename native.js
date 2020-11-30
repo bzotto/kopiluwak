@@ -2,8 +2,6 @@
 // native.js 
 //
 // Kopiluwak. Copyright (c) 2020 Ben Zotto
-// 
-// Requires: constants, objects, types, jvm
 //
 
 var KLNativeImpls = {};
@@ -526,7 +524,7 @@ KLNativeImpls["java.io.FileOutputStream"] = {
 			let ch = String.fromCharCode(byte);
 			outputStr += ch;
 		}
-		console.log(outputStr);
+		KLStdout.outputString(outputStr);
 	}
 };
 

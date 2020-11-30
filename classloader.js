@@ -3,8 +3,6 @@
 //
 // Kopiluwak. Copyright (c) 2020 Ben Zotto
 // 
-// Requires: constants, objects 
-//
 
 function KLLoadedClass(className, superclassName, accessFlags, constantPool, interfaces, fields, methods, attributes) {
 	this.name = className;

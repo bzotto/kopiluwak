@@ -15,6 +15,16 @@ let PrimitivesToJavaLangClass = {};
 let JavaBreakpoints = [];  // { fileName: lineNumber} OR { methodName: fqmn }
 
 function AddClass(klclass) {
+	
+	// Ensure not already loaded
+	for (var i = 0; i < LoadedClasses.length; i++) {
+		var loadedClass = LoadedClasses[i];
+		if (loadedClass.name == klclass.name) {
+			KLLogWarn("Class named " + klclass.name + " is already loaded");
+			return;
+		}
+	}
+
 	if (klclass.superclassName) {
 		// Find the superclass to ensure that the chain above is already loaded.
 		let superclass = ResolveClass(klclass.superclassName);
@@ -608,20 +618,32 @@ function KLClassFromLoadedClass(loadedClass) {
 	return klclass;
 }
 
-function LoadClassAndExecute(mainClassHex, otherClassesHex) {
-		
+let KLJVMStarted = false;
+function KLJVMStartup(stdioHooks, logHook) {
+	if (KLJVMStarted) {
+		KLLogInfo("JVM already started");
+		return;
+	}
+	
+	if (logHook != undefined) {
+		KLLogOutputFn = logHook;
+	}	
+	
+	if (stdioHooks.out) {
+		KLStdout = new KLDirectOutput(stdioHooks.out);
+	}
+	
 	KLLogInfo("Kopiluwak JVM startup: executing java.lang.System.initPhase1");
-		
+	
 	//Create the VM startup thread.
 	let initPhase1Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase1", "descriptor": "()V"});
 	if (initPhase1Method) {
 		let ctx = new KLThreadContext(initPhase1Method);
 		ctx.exec();
-		// debugger;
 	}
 	
-	KLLogInfo("JVM: Completed java.lang.System.initPhase1");
-	
+	KLLogInfo("JVM: Ready.");
+	KLJVMStarted = true;
 	
 	// let initPhase2Method = ResolveMethodReference({"className": "java.lang.System", "methodName": "initPhase2", "descriptor": "(ZZ)I"});
 	// if (initPhase2Method) {
@@ -629,40 +651,33 @@ function LoadClassAndExecute(mainClassHex, otherClassesHex) {
 	// 	ctx.exec();
 	// 	// debugger;
 	// }
-	
-	KLLogInfo("JVM: Loading entry point class");
-	
-	// Load the main class
+}
+
+function KLJVMExecute(mainClassHex) {
+		
+	if (!KLJVMStarted) {
+		debugger;
+		return;
+	}
+		
 	let classLoader = new KLClassLoader();
 	let clresult = classLoader.loadFromHexString(mainClassHex);
 	if (clresult.error) {
-		return clresult.error;
+		KLLogErr(clresult.error);
+		return;
 	}
 	let loadedClass = clresult.loadedClass;
 	let klclass = KLClassFromLoadedClass(loadedClass);
 	AddClass(klclass);
-	let mainClass = klclass;
-	
-	// Load any auxiliary classes on offer.
-	for (let i = 0; i < otherClassesHex.length; i++) {
-		clresult = classLoader.loadFromHexString(otherClassesHex[i]);
-		if (clresult.error) {
-			return "error loading aux class " + i + "" + clresult.error;
-		}
-		klclass = KLClassFromLoadedClass(clresult.loadedClass);
-		AddClass(klclass);
-	}
-	
-	// one of these classes has a main method in it, find it.	
+		
+	// Find the main entry point.
 	var mainMethod = FindMainMethod();
 	if (mainMethod) {
 		let ctx = new KLThreadContext(mainMethod);
 		ctx.exec();
-		
 		KLLogInfo("JVM: Execution completed");
 		
 	} else {
-		return "Didn't find main method entry point"
+		KLLogError("No class found with public static main entry point");
 	}
-	return "";	
 }

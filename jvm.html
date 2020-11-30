@@ -1,5 +1,6 @@
 <html>
 <head>
+	<script src="stdio.js"></script>
 	<script src="logdbg.js"></script>
 	<script src="constants.js"></script>
 	<script src="float.js"></script>
@@ -12,11 +13,32 @@
 	<script src="native.js"></script>
 	<script src="exec.js"></script>
 	<script>
+		
+		function appendTextToTextareaObj(textarea, str) {
+			let outstr = textarea.value + str;
+			textarea.value = outstr;
+		}
+		
+		function stdouthook(linestr) {
+			let outbox = document.getElementById("output");
+			appendTextToTextareaObj(outbox, linestr);
+		}
+		
+		function logouthook(linestr) {
+			let outbox = document.getElementById("logoutput");
+			appendTextToTextareaObj(outbox, linestr + "\n");
+			outbox.scrollTop = outbox.scrollHeight;
+		}
+		
 		function runnit() {
+			if (!KLJVMStarted) { alert("Startup the JVM before loading this class."); }
 			var src = document.getElementById("sourcehex").value;
-			var auxsrc = document.getElementById("auxsourcehex").value;
-			var outp = LoadClassAndExecute(src, auxsrc ? [auxsrc] : []);
+			var outp = KLJVMExecute(src);
 			document.getElementById("output").innerText = outp;			
+		}
+		
+		function startup() {
+			KLJVMStartup({ out: stdouthook }, logouthook);
 		}
 		
 		</script>
@@ -28,16 +50,22 @@
 		</style>
 </head>
 <body>
+	<h2>Kopiluwak (s)crappy JVM</h2>
+	<hr>
+	<button type="button" onclick=startup()>Startup JVM</button> &leftarrow; do this first, once
+	
+	<h4>Compiled Java class file with a <i>main</i> method:</h4>
 	<textarea id="sourcehex">
 CAFEBABE 0000003B 001D0A00 02000307 00040C00 05000601 00106A61 76612F6C 616E672F 4F626A65 63740100 063C696E 69743E01 00032829 56090008 00090700 0A0C000B 000C0100 106A6176 612F6C61 6E672F53 79737465 6D010003 6F757401 00154C6A 6176612F 696F2F50 72696E74 53747265 616D3B08 000E0100 0B48656C 6C6F2057 6F726C64 0A001000 11070012 0C001300 14010013 6A617661 2F696F2F 5072696E 74537472 65616D01 00077072 696E746C 6E010015 284C6A61 76612F6C 616E672F 53747269 6E673B29 56070016 01000A48 656C6C6F 576F726C 64010004 436F6465 01000F4C 696E654E 756D6265 72546162 6C650100 046D6169 6E010016 285B4C6A 6176612F 6C616E67 2F537472 696E673B 29560100 0A536F75 72636546 696C6501 000F4865 6C6C6F57 6F726C64 2E6A6176 61002000 15000200 00000000 02000000 05000600 01001700 00001D00 01000100 0000052A B70001B1 00000001 00180000 00060001 00000001 00090019 001A0001 00170000 00250002 00010000 0009B200 07120DB6 000FB100 00000100 18000000 0A000200 00000300 08000400 01001B00 00000200 1C
 </textarea>	<br/>
-	<textarea id="auxsourcehex">
-</textarea>	<br/>
 
-	<button type="button" onclick=runnit()>Run</button>
+
+	<button type="button" onclick=runnit()>Execute class</button>
+	<hr>
+	VM log output:<br/>
+	<textarea id="logoutput" readonly></textarea>
 	<br/>
-	<textarea id="output">
-		
-	</textarea>
+	Console I/O:<br/>
+	<textarea id="output"></textarea>
 </body>
 </html>
