@@ -1,2 +1,2 @@
 # kopiluwak
-A crappy JVM implementation in Javascript
+A (s)crappy Java Virtual Machine implementation, in Javascript.
