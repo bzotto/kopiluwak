@@ -64,7 +64,12 @@ function KLClassLoader(classFileHexStringOrBytes) {
 		if (!c || c.tag != CONSTANT_Utf8) {
 			return null;
 		}
-	    return String.fromCharCode.apply(null, c.bytes);  // XXX: This is really a UTF16 conversion. Needs to be UTF8.
+		let jsstring = RAStringFromUTF8Array(c.bytes);
+		if (!jsstring) {
+			KLLogWarn("Can't decode constant pool entry " + index + " from UTF8");
+			return "";
+		}
+	    return jsstring;
 	}
 
 	function readCpInfo() {

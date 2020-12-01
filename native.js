@@ -444,7 +444,7 @@ KLNativeImpls["java.lang.Double"] = {
 
 KLNativeImpls["java.lang.StringUTF16"] = {
 	"isBigEndian#()Z": function() {
-		return new JBooleanTrue;
+		return JBooleanTrue;
 	}
 };
 

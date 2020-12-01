@@ -128,7 +128,8 @@ function ResolveClass(className) {
 	return null;
 }
 
-function JavaLangStringObjForUTF16Bytes(bytes) {
+function JavaLangStringObjForJSString(jsStr) {
+	let bytes = KLUTF16ArrayFromString(jsStr);
 	let ints = [];
     for (let i = 0; i < bytes.length; i++) {
 		let intobj = new JInt(bytes[i]);
@@ -140,17 +141,9 @@ function JavaLangStringObjForUTF16Bytes(bytes) {
 	let stringClass = ResolveClass("java.lang.String");
 	stringObj = stringClass.createInstance();
 	stringObj.fieldValsByClass["java.lang.String"]["value"] = byteArray;
-	stringObj.fieldValsByClass["java.lang.String"]["coder"] = new JInt(0);  // = LATIN1 (each byte is one char)
+	stringObj.fieldValsByClass["java.lang.String"]["coder"] = new JInt(1);  // = UTF16
 	stringObj.state = JOBJ_STATE_INITIALIZED;
 	return stringObj;
-}
-
-function JavaLangStringObjForJSString(jsStr) {
-	let bytes = [];
-    for (let i = 0; i < jsStr.length; i++) {
-        bytes.push(jsStr.charCodeAt(i));
-    }
-	return JavaLangStringObjForUTF16Bytes(bytes);
 }
 
 function JSStringFromJavaLangStringObj(jobj) {
@@ -159,10 +152,24 @@ function JSStringFromJavaLangStringObj(jobj) {
 	if (jobj.class.name != "java.lang.String") {
 		debugger;
 	}
+	let coder = jobj.fieldValsByClass["java.lang.String"]["coder"];
 	let arrayref = jobj.fieldValsByClass["java.lang.String"]["value"];
 	let jsstring = "";
-	for (let i = 0; i < arrayref.elements.length; i++) {
-		jsstring += String.fromCharCode(arrayref.elements[i].val);
+	if (coder.val == 0) {
+		// LATIN1 decoding is trivial. 
+		for (let i = 0; i < arrayref.elements.length; i++) {
+			jsstring += String.fromCharCode(arrayref.elements[i].val);
+		}		
+	} else if (coder.val == 1) {
+		// UTF16 decoding
+		let bytes = [];
+		for (let i = 0; i < arrayref.elements.length; i++) {
+			bytes.push(arrayref.elements[i].val)
+		}		
+		jsstring = KLStringFromUTF16Array(bytes);
+		if (!jsstring) {
+			KLLogWarn("Unable to decode UTF16 byte array to string");
+		}
 	}
 	return jsstring;
 }

@@ -220,8 +220,12 @@ function KLClass(loadedOrArrayClass, superclass) {
 	
 	this.stringFromUtf8Constant = function(index) {
 		let c = this.constantPool[index];
-		// XXX: should be utf8ToString, which doesn't work rn.
-	    return String.fromCharCode.apply(null, c["bytes"]);
+		let jsstring = RAStringFromUTF8Array(c.bytes);
+		if (!jsstring) {
+			KLLogWarn("Can't decode constant pool entry " + index + " from UTF8");
+			return "";
+		}
+		return jsstring;
 	}
 	
 	this.classNameFromUtf8Constant = function(index) {
@@ -275,9 +279,8 @@ function KLClass(loadedOrArrayClass, superclass) {
 		switch (constref.tag) {
 			case CONSTANT_String:
 				{
-					let strconst = this.constantPool[constref.string_index];
-					let strbytes = strconst.bytes;
-					val = JavaLangStringObjForUTF16Bytes(strbytes);
+					let conststr = this.stringFromUtf8Constant(constref.string_index);
+					val = JavaLangStringObjForJSString(conststr);
 					break;
 				}
 			case CONSTANT_Integer:
