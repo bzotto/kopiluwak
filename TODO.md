@@ -1,5 +1,4 @@
 - stdin/blocking input without spinning -- partial
-- strings should use real JBytes instead of JInts 
 - invokedynamic + modern string concat 
 - multiple threads/basic scheduler?
 - initPhase2

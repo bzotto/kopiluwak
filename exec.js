@@ -1267,6 +1267,10 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 				break;				
 			}
 		case INSTR_caload:
+			{
+				valueOrObjectref = new JInt(valueOrObjectref.val & 0xFFFF);
+				break;
+			}
 		case INSTR_saload:
 			{
 				let sign = valueOrObjectref.val & 0x8000;
@@ -1525,11 +1529,13 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 			arrayref.elements[indexVal] = value;
 			break;
 		case INSTR_bastore:
-			arrayref.elements[indexVal] = new JInt(value.val & 0xFF);
+			arrayref.elements[indexVal] = new JByte(value.val & 0xFF);
 			break;
 		case INSTR_castore:
+			arrayref.elements[indexVal] = new JChar(value.val & 0xFFFF);
+			break;
 		case INSTR_sastore:
-			arrayref.elements[indexVal] = new JInt(value.val & 0xFFFF);
+			arrayref.elements[indexVal] = new JShort(value.val & 0xFFFF);
 			break;
 		}
 		IncrementPC(frame, 1);
