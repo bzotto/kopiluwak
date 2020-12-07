@@ -625,6 +625,7 @@ function KLClassFromLoadedClass(loadedClass) {
 	return klclass;
 }
 
+
 let KLJVMStarted = false;
 function KLJVMStartup(stdioHooks, logHook) {
 	if (KLJVMStarted) {
@@ -660,6 +661,8 @@ function KLJVMStartup(stdioHooks, logHook) {
 	// }
 }
 
+let KLJVMMainThread = null;
+
 function KLJVMExecute(mainClassHex) {
 		
 	if (!KLJVMStarted) {
@@ -667,24 +670,76 @@ function KLJVMExecute(mainClassHex) {
 		return;
 	}
 		
-	let classLoader = new KLClassLoader();
-	let clresult = classLoader.loadFromHexString(mainClassHex);
-	if (clresult.error) {
-		KLLogErr(clresult.error);
+	if (!KLJVMMainThread) {
+		if (!mainClassHex) {
+			debugger;
+		}
+		let classLoader = new KLClassLoader();
+		let clresult = classLoader.loadFromHexString(mainClassHex);
+		if (clresult.error) {
+			KLLogError("Failed to load class file: " + clresult.error);
+			return;
+		}
+		let loadedClass = clresult.loadedClass;
+		let klclass = KLClassFromLoadedClass(loadedClass);
+		AddClass(klclass);
+		
+		// Find the main entry point.
+		var mainMethod = FindMainMethod();
+		if (mainMethod) {
+			KLJVMMainThread = new KLThreadContext(mainMethod);
+		} else {
+			KLLogError("No class found with public static main entry point");
+			return;
+		}
+	}
+		
+	if (KLJVMMainThread.state != KLTHREAD_STATE_RUNNING) {
 		return;
 	}
-	let loadedClass = clresult.loadedClass;
-	let klclass = KLClassFromLoadedClass(loadedClass);
-	AddClass(klclass);
 		
-	// Find the main entry point.
-	var mainMethod = FindMainMethod();
-	if (mainMethod) {
-		let ctx = new KLThreadContext(mainMethod);
-		ctx.exec();
+	KLJVMMainThread.exec();
+	
+	if (KLJVMMainThread.state == KLTHREAD_STATE_ENDED) {
 		KLLogInfo("JVM: Execution completed");
+		KLJVMMainThread = null;
+	} else if (KLJVMMainThread.state == KLTHREAD_STATE_WAITING) {
+		KLLogInfo("JVM: Waiting");
+	}
+}
+
+function KLJVMSubmitInput(fd, inputBytes) {
+	if (fd != KLFD_stdin) {
+		KLLogWarn("Only stdin file desceriptor is currently recognized for input");
+		return;
+	}
+
+	for (let i = 0; i < inputBytes.length; i++) {
+		KLStdin.submitInput(inputBytes[i]);
+	}
+	KLFulfillPendingIoRequests();
+}
+
+function KLFulfillPendingIoRequests() {
+	if (!KLJVMMainThread || KLJVMMainThread.state != KLTHREAD_STATE_WAITING) {
+		return;
+	}
+	
+	let ioRequest = KLJVMMainThread.pendingIoRequest;	
+	if (ioRequest) {
+		if (ioRequest.fd != KLFD_stdin) {
+			debugger;
+		}
 		
-	} else {
-		KLLogError("No class found with public static main entry point");
+		if (KLStdin.available() == 0) {
+			return;
+		}
+
+		let availBytes = KLStdin.readBytes(ioRequest.len);
+		for (let i = 0; i < availBytes.length; i++) {
+			ioRequest.buffer.push(availBytes[i]);
+		}
+		ioRequest.completedLen = availBytes.length;
+		KLJVMMainThread.state = KLTHREAD_STATE_RUNNING;
 	}
 }

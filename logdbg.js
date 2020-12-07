@@ -6,9 +6,9 @@
 // Requires: constants, objects, types, jvm
 //
 
-const KLogLevelInfo = 0;
-const KLogLevelWarn = 1;
-const KLogLevelError = 2;
+const KLLogLevelInfo = 0;
+const KLLogLevelWarn = 1;
+const KLLogLevelError = 2;
 
 let KLLogOutputFn = function(msg) {
 	console.log(msg);
@@ -16,16 +16,16 @@ let KLLogOutputFn = function(msg) {
 
 function KLLog(msg, level) {
 	if (level == undefined) {
-		level = KLogLevelInfo;
+		level = KLLogLevelInfo;
 	}
 	
 	let outstr = "";
 	
 	switch (level) {
-	case KLogLevelInfo:
+	case KLLogLevelInfo:
 		outstr += "[INFO] ";
 		break;
-	case KLogLevelWarn:
+	case KLLogLevelWarn:
 		outstr += "[WARN] ";
 		break;
 	case KLLogLevelError:
@@ -37,13 +37,13 @@ function KLLog(msg, level) {
 }
 
 function KLLogInfo(msg) {
-	KLLog(msg, KLogLevelInfo);
+	KLLog(msg, KLLogLevelInfo);
 }
 
 function KLLogWarn(msg) {
-	KLLog(msg, KLogLevelWarn);
+	KLLog(msg, KLLogLevelWarn);
 }
 
 function KLLogError(msg) {
-	KLLog(msg, KLogLevelError);
+	KLLog(msg, KLLogLevelError);
 }

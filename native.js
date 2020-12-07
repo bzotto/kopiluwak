@@ -484,10 +484,6 @@ KLNativeImpls["jdk.internal.reflect.Reflection"] = {
 	}
 };
 
-const KLFD_stdin = 0;
-const KLFD_stdout = 1;
-const KLFD_stderr = 2;
-
 KLNativeImpls["java.io.FileDescriptor"] = {
 	"initIDs#()V": function() {	},
 	"getHandle#(I)J": function(thread, fdObj) {
@@ -507,15 +503,58 @@ KLNativeImpls["java.io.FileDescriptor"] = {
 	}
 };
 
+
+// The following two streams are just always assumed to be stdin and stdout.
 KLNativeImpls["java.io.FileInputStream"] = {
-	"initIDs#()V": function() {	}
-	
+	"initIDs#()V": function() {	},
+	"readBytes#([BII)I": function(thread, streamObj, bObj, offObj, lenObj) {
+		let handle = KLIoHandleFromJavaIoFileInputStream(streamObj);
+		if (handle != KLFD_stdin) {
+			KLLogWarn("Can't read from any non-stdin handle");
+			return new JInt(0);
+		}
+		
+		// Have we been re-entered while waiting for input?
+		if (thread.pendingIoRequest) {
+			let ioRequest = thread.pendingIoRequest;
+			thread.pendingIoRequest = null;
+			let bytesCopied = ioRequest.completedLen;
+			if (bytesCopied > lenObj.val) {
+				debugger;
+			}
+			for (let i = 0; i < bytesCopied; i++) {
+				bObj.elements[offObj.val + i] = new JInt(ioRequest.buffer[i]);
+			}
+			return new JInt(bytesCopied);
+		} else {
+			let ioRequest = new KLIoRequest(KLFD_stdin, lenObj.val);
+			thread.waitForIoRequest(ioRequest);
+			return;
+		}		
+	},
+	"available0#()I": function(thread, streamObj) {
+		let handle = KLIoHandleFromJavaIoFileInputStream(streamObj);
+		if (handle != KLFD_stdin) {
+			KLLogWarn("Can't read from any non-stdin handle");
+			return new JInt(0);
+		}
+		
+		let available = KLIoStdinImmediatelyAvailableBytes();
+		return new JInt(available);
+	}
 };
 
 KLNativeImpls["java.io.FileOutputStream"] = {
 	"initIDs#()V": function() {	},
 	"writeBytes#([BIIZ)V": function(thread, streamObj, bObj, offObj, lenObj, appendObj) {
-		// For now assume these are UTF8 strings. Make a JS string of the byte array.
+		
+		let handle = KLIoHandleFromJavaIoFileOutputStream(streamObj);
+		if (handle != KLFD_stdout && handle != KLFD_stderr) {
+			KLLogWarn("Can't write to non-std handle");
+			return;
+		}
+		
+		// For now assume these are ASCIIish strings. Make a JS string from the byte array.
 		let offset = offObj.val;
 		let len = lenObj.val;
 		let outputStr = "";
@@ -524,7 +563,11 @@ KLNativeImpls["java.io.FileOutputStream"] = {
 			let ch = String.fromCharCode(byte);
 			outputStr += ch;
 		}
-		KLStdout.outputString(outputStr);
+		if (handle == KLFD_stdout) {
+			KLStdout.outputString(outputStr);
+		} else if (handle == KLFD_stderr) {
+			KLStderr.outputString(outputStr);
+		}
 	}
 };
 

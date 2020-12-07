@@ -13,11 +13,34 @@ function KLStackFrame(method) {
 	this.completionHandlers = [];
 }
 
+// const KLTHREAD_STATE_STOPPED = 0;
+const KLTHREAD_STATE_RUNNING = 1;
+const KLTHREAD_STATE_ENDED = 2;
+const KLTHREAD_STATE_WAITING = 3;
+
+const KLTHREAD_END_REASON_NORMAL = 0;
+const KLTHREAD_END_REASON_EXCEPTION = 1;
+const KLTHREAD_END_REASON_VM_ERROR = 2;
+
+// each new KLThreadContext bumps this value
+let KLNextThreadId = 1; 
+
+function KLIoRequest(fd, len) {
+	this.fd = fd;
+	this.buffer = [];
+	this.len = len;
+	this.completedLen = 0;
+}
+
 function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 
 	this.stack = [];
+	this.threadId = KLNextThreadId++;
 	this.javaThreadObj = null;
+	this.pendingIo = null;
 	this.returnValue = null;
+	this.state = KLTHREAD_STATE_RUNNING;
+	this.endReason;
 	
 	this.pushFrame = function(frame) {
 		this.stack.unshift(frame);
@@ -85,8 +108,36 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 		return this.javaThreadObj;
 	}
 	
-	this.exec = function() {
-		while (this.stack.length > 0) {
+	this.waitForIoRequest = function(ioRequest) {
+		this.pendingIoRequest = ioRequest;
+		this.state = KLTHREAD_STATE_WAITING;
+	}
+	
+	this.completeIoRequest = function(ioRequest) {
+		if (!this.state == KLTHREAD_STATE_WAITING || 
+			this.pendingIoRequest != ioRequest) {
+			debugger;
+		}
+		this.state = KLTHREAD_STATE_RUNNING;
+	}	
+		
+	this.endThreadWithReason = function(reason) {
+		this.state = KLTHREAD_STATE_ENDED;
+		this.endReason = reason;
+	}
+		
+	this.exec = function(maxInstructions) {
+		
+		if (this.state != KLTHREAD_STATE_RUNNING) {
+			debugger;
+			return;
+		}
+		this.state = KLTHREAD_STATE_RUNNING;
+		if (maxInstructions == undefined) { maxInstructions = 0; }
+		let instructionsExecuted = 0;
+		
+		while (this.stack.length > 0 && (maxInstructions == 0 || instructionsExecuted < maxInstructions)) {
+			
 			let frame = this.stack[0];
 			
 			// If there's a pending exception in this frame, look for a handler for it at our current
@@ -110,6 +161,7 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 					let jmessage = exception.fieldValsByClass["java.lang.Throwable"]["detailMessage"];
 					let message = (jmessage && !jmessage.isa.isNull()) ? JSStringFromJavaLangStringObj(jmessage) : "(unknown)";
 					KLLogInfo("JVM: Java thread terminated due to unhandled exception " + exception.class.name + ":\n\t" + message);
+					this.endThreadWithReason(KLTHREAD_END_REASON_EXCEPTION);
 					return; 
 				}
 				
@@ -153,6 +205,13 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 							}
 						}						
 						let result = frame.method.impl.apply(null, implArgs);
+						// If this function changed the thread's state to waiting, by making an IO request, then return immediately
+						// leaving the state intact. The I/O's completion will re-enter this native method which should know what to
+						// do with the updated situation.
+						if (this.state == KLTHREAD_STATE_WAITING) {
+							return;
+						}
+						
 						// Skip the epilog logic if the native impl either pushed another frame onto the stack (called another
 						// method) or threw an exception. In the former case, we will unwind back to this frame eventually and 
 						// re-invoke the same method in full so the impl must be smart enough to know when to return.
@@ -184,6 +243,7 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 			// Verify that the pc is valid. 
 			if (frame.pc < 0 || frame.pc >= frame.method.length) {
 				KLLogError("JVM: Error: pc " + pc + " invalid for method " + this.currentFQMethodName());
+				this.endThreadWithReason(KLTHREAD_END_REASON_VM_ERROR);
 				return;
 			}
 						
@@ -204,6 +264,11 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 				debugger;			
 			}
 			handler(frame, opcode, this);
+			instructionsExecuted++;
+		}
+		
+		if (this.stack.length == 0) {
+			this.endThreadWithReason(KLTHREAD_END_REASON_NORMAL);
 		}
 	}
 	
