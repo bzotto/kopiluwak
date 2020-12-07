@@ -1254,6 +1254,30 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 			return;
 		}
 		let valueOrObjectref = arrayref.elements[indexVal];
+		// byte/char/short gets sign-extended to an int value.
+		switch (opcode) {
+		case INSTR_baload:
+			{
+				let sign = valueOrObjectref.val & 0x80;
+				if (sign) {
+					valueOrObjectref = new JInt(0xFFFFFF00 | valueOrObjectref.val);
+				} else {
+					valueOrObjectref = new JInt(valueOrObjectref.val);
+				}
+				break;				
+			}
+		case INSTR_caload:
+		case INSTR_saload:
+			{
+				let sign = valueOrObjectref.val & 0x8000;
+				if (sign) {
+					valueOrObjectref = new JInt(0xFFFF0000 | valueOrObjectref.val);
+				} else {
+					valueOrObjectref = new JInt(valueOrObjectref.val);
+				}
+				break;				
+			}
+		}
 		frame.operandStack.push(valueOrObjectref);
 		IncrementPC(frame, 1);
 	}

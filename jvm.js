@@ -132,7 +132,7 @@ function JavaLangStringObjForJSString(jsStr) {
 	let bytes = KLUTF16ArrayFromString(jsStr);
 	let ints = [];
     for (let i = 0; i < bytes.length; i++) {
-		let intobj = new JInt(bytes[i]);
+		let intobj = new JByte(bytes[i]);
         ints.push(intobj);
     }
 	let arrayClass = ResolveClass("[B");
