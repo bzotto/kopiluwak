@@ -22,6 +22,8 @@ If you want to run your own code, you'll need to first compile it with your `jav
 ## What doesn't it do?
 Uh, frankly, quite a lot.
 - `invokedynamic` and the method handle stuff that was new in SE7, because it's a super complicated meta-JVM within the JVM and I can barely understand the spec so I haven't done this yet. This omission won't block JDK startup or simply written main code, but a bunch of stuff in current javac, like string concat with the `+` operator will emit dynamic call site stuff, and that won't work. 
+- No "wide" instructions.
+- I don't think there are many other nontrivial unimplemented opcodes. A bunch of the conversion (`x2y` opcodes) are probably still missing.  
 - Multiple threads. Some rough sketching is in there in anticipation of attempting it.
 - I/O stuff is very rudimentary; the standard streams have a rough implementation for basic console I/O, but nothing else is supported.
 - Native method implementations (see `native.js`) are as basic as I could get away with for execution to progress. Unforntunately the JDK is absolutely riddled with native method stubs that expect the VM to have an implmentation handy. These are not part of any "spec" despite having precise semantics which are often not detailed anywhere. Your mileage may vary.
@@ -29,8 +31,9 @@ Uh, frankly, quite a lot.
 - No class file static validation via either inference or explicit type checking. (Many type assumptions will break in a debugger at runtime if bytecode violates them, though.) This isn't a big deal if you trust the compiler (`javac`) that produced your input. 
 - No other real security or validation beyond some best-effort stuff along the way. Downside, it's open to malicious class files. On the upside, it's a dumb sandbox that can't do anything bad anyway.
 - It's certainly super buggy! There are a lot of `debugger` statements in the code which will hit when various conditions that should be true fail to hold. That's at least a handy way of noticing that it's gone off the rails.
-- Error handling isn't always consistent or verbose enough.
+- Error handling isn't always consistent or verbose enough. In particular, runtime errors in class/method/field resolution won't manifest as exceptions thrown out of instruction handlers as the spec calls for.
 - Random flat files without clear inclusion hierarchy and tons stuff in the global namespace that doesn't need to be, and inconsistent naming and namespacing. Work in progress.
+- It's super inconsistent in internal abstractions and enforcement thereof, and inconsistent syntax/style, and all sorts of other software design flaws. It's been evolving over time, so maybe there's some end state where it gets tied up nicely and I'm happy with it.
 - Not all attributes in the class files are looked at or understood yet, though the parse shouldn't fail.
 - Probably you might want to use this from inside a Node environment but I don't know anything about that so it won't.
 - I keep a `TODO` file in this repo for some non-comprehensive notes to self.

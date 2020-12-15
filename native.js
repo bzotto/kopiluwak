@@ -141,10 +141,10 @@ KLNativeImpls["java.lang.Runtime"] = {
 		return new JInt(1);
 	},
 	"maxMemory#()J": function(thread) {
-		// XXX We should be able to grab Long.MAX_VALUE here but it's not being set by Long's <clinit>
-		// and I don't know why.
-		let longMax = new KLInt64([0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
-		return new JLong(longMax);
+		// Use Long.MAX_VALUE
+		let longClass = ResolveClass("java.lang.Long");
+		let longMax = longClass.fieldVals["MAX_VALUE"];
+		return longMax;
 	}
 };
 
@@ -592,7 +592,7 @@ KLNativeImpls["sun.nio.fs.UnixNativeDispatcher"] = {
 	"getcwd#()[B": function() {
 		let klclass = ResolveClass("[B");
 		let jarray = new JArray(klclass, 1);
-		jarray.elements[0] = new JInt('/');
+		jarray.elements[0] = new JByte('/');
 		return jarray;
 	}
 }
