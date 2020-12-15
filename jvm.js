@@ -456,39 +456,19 @@ function HandlerPcForException(klclass, currentPC, exceptionObj, exceptionTable)
 }
 
 function DebugBacktrace(threadContext) {	
+	let threadBacktrace = threadContext.currentBacktrace();
 	let backtrace = "";
-	for (let i = 0; i < threadContext.stack.length; i++) {
-		let frame = threadContext.stack[i];
-		
-		// Is there a line number table?
-		let lineNumbers = frame.method.lineNumbers;
-		let lineNumber = null;
-		if (lineNumbers) {
-			for (let j = 0; j < lineNumbers.length; j++) {
-				let lineEntry = lineNumbers[j];
-				if (lineEntry.start_pc > frame.pc) {
-					break;
-				}
-				lineNumber = lineEntry.line_number;
-			}
-		}
-		// Is there a source file name?
-		let sourceFileName = frame.method.class.sourceFileName();
-		
-		let fqmn = frame.method.class.name + "." + frame.method.name;
-		if (!sourceFileName) {
-			sourceFileName = "unknown";
-		}
-		if (!lineNumber) {
-			lineNumber = "??";
-		}
-		backtrace += "\t" + (fqmn + "(" + sourceFileName + ":" + lineNumber + ")");
+	for (let i = 0; i < threadBacktrace.length; i++) {
+		let frame = threadBacktrace[i];
+		let fqmn = frame.className + "." + frame.methodName;
+		backtrace += "\t" + (fqmn + "(" + (frame.fileName ? frame.fileName : "unknown") + ":" + (frame.lineNumber ? frame.lineNumber : "??") + ")");
 		if (i == 0) {
 			backtrace += "\t<---";
 		}	
 		backtrace += "\n";
 	}
 	KLLogInfo(backtrace);
+	return backtrace;
 }
 
 function CreateClassInitFrameIfNeeded(klclass) {

@@ -42,5 +42,5 @@ Uh, frankly, quite a lot.
 Anything you want really, per the license, but I wouldn't suggest it for anything I'd call "production use" without some serious tinkering and/or careful testing. 
 
 ## I have looked at the code, and you are kinda bad at this.
-Checks out. I haven't written JS professionally for over a decade and I hear there's new stuff in the langauge since then, but I don't really know what it is. Also this is a work in progress and a hobby project I've been hacking on using the Safari debugger. It's on GitHub because maybe someone some day will find something useful in conception or code to scavenge, but please don't judge too harshly. 
+Checks out. I haven't written JS (or Java!) professionally for over a decade and I hear there's new stuff in the langauge since then, but I don't really know what it is. Also this is a work in progress and a hobby project I've been hacking on using the Safari debugger. It's on GitHub because maybe someone some day will find something useful in conception or code to scavenge, but please don't judge too harshly. 
 

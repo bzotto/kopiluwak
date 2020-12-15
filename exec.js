@@ -126,6 +126,41 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 		this.endReason = reason;
 	}
 		
+	// Returns an array of objects with keys className, methodName, fileName, lineNumber 
+	this.currentBacktrace = function() {
+		let stacktrace = [];
+				
+		for (let i = 0; i < this.stack.length; i++) {
+			let frame = this.stack[i];
+	
+			// Is there a line number table?
+			let lineNumbers = frame.method.lineNumbers;
+			let lineNumber = null;
+			if (lineNumbers) {
+				for (let j = 0; j < lineNumbers.length; j++) {
+					let lineEntry = lineNumbers[j];
+					if (lineEntry.start_pc > frame.pc) {
+						break;
+					}
+					lineNumber = lineEntry.line_number;
+				}
+			}
+			// Is there a source file name?
+			let sourceFileName = frame.method.class.sourceFileName();
+	
+			let frameEntry = { "className": frame.method.class.name, "methodName": frame.method.name };
+			if (sourceFileName) {
+				frameEntry["fileName"] = sourceFileName;
+			}
+			if (lineNumber) {
+				frameEntry["lineNumber"] = lineNumber;
+			}
+			
+			stacktrace.push(frameEntry);
+		}
+		return stacktrace;
+	}	
+	
 	this.exec = function(maxInstructions) {
 		
 		if (this.state != KLTHREAD_STATE_RUNNING) {

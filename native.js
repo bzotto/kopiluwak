@@ -70,7 +70,44 @@ KLNativeImpls["java.lang.Object"] = {
 
 KLNativeImpls["java.lang.Throwable"] = {
 	"fillInStackTrace#(I)Ljava.lang.Throwable;": function(thread, throwableObj) {
-		// XXX Implement me.
+		// This is an instance method on a Throwable to fill in the stack trace, which we
+		// do by directly setting the private stackTrace field to an array of StackTraceElements objects.
+		// We create those things manually here.
+		
+		// Build the stack trace array.
+		let stackTraceElementClass = ResolveClass("java.lang.StackTraceElement");
+		
+		// This snapshots the full state, including the call to this method, which is not really what we want.
+		// For now, just shove off the first frame, although we'll still see Throwable on the top of the stack.
+		let stackTraceRaw = thread.currentBacktrace();
+		stackTraceRaw.shift();
+		
+		let stackElementsBuilder = [];
+		for (let i = 0; i < stackTraceRaw.length; i++) {
+			let stackTraceElement = stackTraceElementClass.createInstance();
+			stackTraceElement.fieldValsByClass["java.lang.StackTraceElement"]["declaringClass"] = JavaLangStringObjForJSString(stackTraceRaw[i].className);
+			stackTraceElement.fieldValsByClass["java.lang.StackTraceElement"]["methodName"] = JavaLangStringObjForJSString(stackTraceRaw[i].methodName);
+			let fileName = stackTraceRaw[i].fileName;
+			if (fileName) {
+				stackTraceElement.fieldValsByClass["java.lang.StackTraceElement"]["fileName"] = JavaLangStringObjForJSString(fileName);
+			} else {
+				stackTraceElement.fieldValsByClass["java.lang.StackTraceElement"]["fileName"] = new JSNull();
+			}
+			let lineNumber = stackTraceRaw[i].lineNumber;
+			if (lineNumber) {
+				stackTraceElement.fieldValsByClass["java.lang.StackTraceElement"]["lineNumber"] = JavaLangStringObjForJSString(lineNumber + '');
+			} else {
+				stackTraceElement.fieldValsByClass["java.lang.StackTraceElement"]["lineNumber"] = new JSNull();
+			}
+			stackElementsBuilder.push(stackTraceElement);
+		}
+		
+		let stackTraceElementArrayClass = ResolveClass("[Ljava.lang.StackTraceElement;")
+		let stackTraceArray = new JArray(stackTraceElementArrayClass, stackElementsBuilder.length);
+		stackTraceArray.elements = stackElementsBuilder;
+		
+		throwableObj.fieldValsByClass["java.lang.Throwable"]["stackTrace"] = stackTraceArray;
+
 		return throwableObj;
 	}
 };
