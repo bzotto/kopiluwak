@@ -2110,4 +2110,20 @@ function KLThreadContext(bootstrapMethod, bootstrapArgs) {
 		let jumpOffset = S32FromInstruction(frame, indexedOffset);
 		IncrementPC(frame, jumpOffset);
 	}
+	
+	this.instructionHandlers[INSTR_jsr] = function(frame) {
+		let offset = S16FromInstruction(frame);
+		let address = new JReturnAddress(frame.pc + 3);
+		frame.operandStack.push(address);
+		IncrementPC(frame, offset);
+	}
+	
+	this.instructionHandlers[INSTR_ret] = function(frame) {
+		let index = U8FromInstruction(frame);
+		let address = frame.localVariables[index];
+		if (!address || !address.isa.isReturnAddress()) {
+			debugger;
+		}
+		frame.pc = address.val;
+	}
 }

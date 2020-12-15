@@ -22,9 +22,9 @@ If you want to run your own code, you'll need to first compile it with your `jav
 ## What doesn't it do?
 Uh, frankly, quite a lot.
 - `invokedynamic` and the method handle stuff that was new in SE7, because it's a super complicated meta-JVM within the JVM and I can barely understand the spec so I haven't done this yet. This omission won't block JDK startup or simply written main code, but a bunch of stuff in current javac, like string concat with the `+` operator will emit dynamic call site stuff, and that won't work. 
-- `jsr`/`ret` (old style exception catch) is NYI but easy and coming soon. 
 - Multiple threads. Some rough sketching is in there in anticipation of attempting it.
 - I/O stuff is very rudimentary; the standard streams have a rough implementation for basic console I/O, but nothing else is supported.
+- Native method implementations (see `native.js`) are as basic as I could get away with for execution to progress. Unforntunately the JDK is absolutely riddled with native method stubs that expect the VM to have an implmentation handy. These are not part of any "spec" despite having precise semantics which are often not detailed anywhere. Your mileage may vary.
 - No garbage collection as such. It sort of cleverly, or stupidly, lets the browser's JS object lifecycle management take care of that (or not).
 - No class file static validation via either inference or explicit type checking. (Many type assumptions will break in a debugger at runtime if bytecode violates them, though.) This isn't a big deal if you trust the compiler (`javac`) that produced your input. 
 - No other real security or validation beyond some best-effort stuff along the way. Downside, it's open to malicious class files. On the upside, it's a dumb sandbox that can't do anything bad anyway.
